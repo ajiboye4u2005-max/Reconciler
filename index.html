@@ -387,7 +387,7 @@
           });
 
           // --- 5. Structured Summary Report Generation ---
-          const createDetailedSummary = (processedData, matchedData, unmatchedData) => {
+          const createDetailedSummaryMetrics = (processedData, matchedData, unmatchedData) => {
               // 1. Split by Appearance Count
               const onceRecords = processedData.filter(r => r.Appearance_Count === 1);
               const multiRecords = processedData.filter(r => r.Appearance_Count > 1);
@@ -409,8 +409,8 @@
               };
           };
 
-          const summaryMetricsA = createDetailedSummary(processedA, matchedA, unmatchedA);
-          const summaryMetricsB = createDetailedSummary(processedB, matchedB, unmatchedB);
+          const summaryMetricsA = createDetailedSummaryMetrics(processedA, matchedA, unmatchedA);
+          const summaryMetricsB = createDetailedSummaryMetrics(processedB, matchedB, unmatchedB);
 
 
           setResults({ 
@@ -431,6 +431,48 @@
           setProcessing(false);
         }
       };
+      
+      /**
+       * Creates the structured summary array for both Excel output and Web display.
+       */
+      const getStructuredSummaryData = (metrics, categoryLabel) => {
+          const sum1Count = metrics.onceCount + metrics.multiCount;
+          const sum1Amount = metrics.onceAmount + metrics.multiAmount;
+
+          const sum2Count = metrics.matchedCount + metrics.unmatchedCount;
+          const sum2Amount = metrics.matchedAmount + metrics.unmatchedAmount;
+
+          const controlCheckCount = sum2Count - sum1Count;
+          const controlCheckAmount = sum2Amount - sum1Amount;
+
+          return [
+              // Headers
+              { Category: `${categoryLabel} Summary Metric`, Count: 'Count', Amount: 'Amount', isHeader: true },
+              
+              // Group 1: Based on Duplication (Input Totals)
+              { Category: 'Total Count/Amount (Unique IDs appearing once)', Count: metrics.onceCount, Amount: metrics.onceAmount },
+              { Category: 'Total Count/Amount (Unique IDs appearing > once)', Count: metrics.multiCount, Amount: metrics.multiAmount },
+              { Category: 'Grand Total (Input Records)', Count: sum1Count, Amount: sum1Amount, isTotal: true, isInputTotal: true },
+              
+              { Category: '', Count: '', Amount: '' }, // Blank row
+              
+              // Group 2: Based on Reconciliation (Output Totals)
+              { Category: 'Total matched items Count and amount', Count: metrics.matchedCount, Amount: metrics.matchedAmount },
+              { Category: 'Total Unmatched Items Count and Amount', Count: metrics.unmatchedCount, Amount: metrics.unmatchedAmount },
+              { Category: 'Grand Total (Reconciliation Result)', Count: sum2Count, Amount: sum2Amount, isTotal: true },
+              
+              { Category: '', Count: '', Amount: '' }, // Blank row
+              
+              // Control Check
+              { 
+                  Category: 'Control Check (Diff: Grand Total 2 - Grand Total 1)', 
+                  Count: controlCheckCount, 
+                  Amount: controlCheckAmount,
+                  isControl: true
+              },
+          ];
+      };
+
 
       const downloadResults = async () => {
         if (!results) return;
@@ -467,49 +509,15 @@
         XLSX.writeFile(wb4, `4_Category_B_Analysis_${timestamp}.xlsx`);
         
         // --- 5. Summary Report File (Structured Output) ---
-        const buildStructuredSummary = (metrics, categoryLabel) => {
-            const sum1Count = metrics.onceCount + metrics.multiCount;
-            const sum1Amount = metrics.onceAmount + metrics.multiAmount;
+        const summaryA_data = getStructuredSummaryData(results.summaryMetricsA, 'Category A');
+        const summaryB_data = getStructuredSummaryData(results.summaryMetricsB, 'Category B');
 
-            const sum2Count = metrics.matchedCount + metrics.unmatchedCount;
-            const sum2Amount = metrics.matchedAmount + metrics.unmatchedAmount;
-
-            const controlCheckCount = sum2Count - sum1Count;
-            const controlCheckAmount = sum2Amount - sum1Amount;
-
-            return [
-                // Headers
-                { Category: 'Summary Metric', Count: 'Count', Amount: 'Amount' },
-                
-                // Group 1: Based on Duplication (Input Totals)
-                { Category: 'Total Count and Amount with Unique IDs appearing once', Count: metrics.onceCount, Amount: metrics.onceAmount },
-                { Category: 'Total Count and amount of Unit IDs appearing more than one', Count: metrics.multiCount, Amount: metrics.multiAmount },
-                { Category: 'Grand Total (Input Records)', Count: sum1Count, Amount: sum1Amount },
-                
-                { Category: '', Count: '', Amount: '' }, // Blank row
-                
-                // Group 2: Based on Reconciliation (Output Totals)
-                { Category: 'Total matched items Count and amount', Count: metrics.matchedCount, Amount: metrics.matchedAmount },
-                { Category: 'Total Unmatched Items Count and Amount', Count: metrics.unmatchedCount, Amount: metrics.unmatchedAmount },
-                { Category: 'Grand Total (Reconciliation Result)', Count: sum2Count, Amount: sum2Amount },
-                
-                { Category: '', Count: '', Amount: '' }, // Blank row
-                
-                // Control Check
-                { 
-                    Category: 'Control Check (Diff: Grand Total 2 - Grand Total 1)', 
-                    Count: controlCheckCount, 
-                    Amount: controlCheckAmount,
-                },
-            ];
-        };
-
-        const summaryA_data = buildStructuredSummary(results.summaryMetricsA, 'CATEGORY A');
-        const summaryB_data = buildStructuredSummary(results.summaryMetricsB, 'CATEGORY B');
+        // Remove the helper fields used for styling in the web display
+        const cleanupSummary = (data) => data.map(({ isHeader, isTotal, isInputTotal, isControl, ...rest }) => rest);
 
         const wb5 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(summaryA_data), 'Category A Summary');
-        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(summaryB_data), 'Category B Summary');
+        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryA_data)), 'Category A Summary');
+        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryB_data)), 'Category B Summary');
         XLSX.writeFile(wb5, `5_Summary_Report_${timestamp}.xlsx`);
 
         // Notify user
@@ -530,25 +538,6 @@
         setResults(null);
         setError(null);
       };
-
-      // --- Simple Summary View for Step 3 Preview ---
-      const buildSimpleSummaryView = (metricsA, metricsB) => {
-          const totalA = metricsA.onceAmount + metricsA.multiAmount;
-          const totalB = metricsB.onceAmount + metricsB.multiAmount;
-
-          return [
-              { Category: '1. Matched Items (Record_Category_A)', Count: metricsA.matchedCount, Amount: metricsA.matchedAmount },
-              { Category: '2. Unmatched Items (Record_Category_A)', Count: metricsA.unmatchedCount, Amount: metricsA.unmatchedAmount },
-              { Category: '3. Total Consolidated Record_Category_A', Count: metricsA.matchedCount + metricsA.unmatchedCount, Amount: totalA },
-              
-              { Category: '4. Matched Items (Record_Category_B)', Count: metricsB.matchedCount, Amount: metricsB.matchedAmount },
-              { Category: '5. Unmatched Items (Record_Category_B)', Count: metricsB.unmatchedCount, Amount: metricsB.unmatchedAmount },
-              { Category: '6. Total Consolidated Record_Category_B', Count: metricsB.matchedCount + metricsB.unmatchedCount, Amount: totalB },
-
-              { Category: '7. Overall Variance (A Total - B Total)', Count: (totalA - totalB), Amount: totalA - totalB }
-          ];
-      };
-
 
       return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -806,23 +795,35 @@
                   </div>
 
                   <div className="bg-gray-50 rounded-lg p-6">
-                    <h3 className="font-semibold text-lg mb-4">Summary Report Preview</h3>
+                    <h3 className="font-semibold text-lg mb-4">Structured Summary Preview (Category A)</h3>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b-2 border-gray-300">
-                            <th className="text-left py-2 px-3">Category</th>
-                            <th className="text-right py-2 px-3">Count</th>
-                            <th className="text-right py-2 px-3">Amount</th>
-                          </tr>
+                            <tr className="border-b-2 border-gray-300">
+                                <th className="text-left py-2 px-3">Summary Metric</th>
+                                <th className="text-right py-2 px-3">Count</th>
+                                <th className="text-right py-2 px-3">Amount</th>
+                            </tr>
                         </thead>
                         <tbody>
-                          {/* Use the simple view for display purposes */}
-                          {buildSimpleSummaryView(results.summaryMetricsA, results.summaryMetricsB).map((row, idx) => (
-                            <tr key={idx} className={`border-b border-gray-200`}>
+                          {/* Use the new structured summary logic for Category A display */}
+                          {getStructuredSummaryData(results.summaryMetricsA, 'Category A').filter(row => !row.isHeader).map((row, idx) => (
+                            <tr 
+                                key={idx} 
+                                className={`border-b border-gray-200 
+                                  ${row.isInputTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : ''}
+                                  ${row.isTotal && !row.isInputTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : ''}
+                                  ${row.isControl ? 'bg-red-100 font-bold border-red-400 border-t-2' : ''}
+                                  ${row.Category === '' ? 'h-4 bg-gray-100 border-none' : ''}
+                                `}
+                            >
                               <td className="py-2 px-3">{row.Category}</td>
-                              <td className="text-right py-2 px-3">{row.Count.toLocaleString()}</td>
-                              <td className="text-right py-2 px-3">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              <td className="text-right py-2 px-3">
+                                {typeof row.Count === 'number' ? row.Count.toLocaleString() : row.Count}
+                              </td>
+                              <td className="text-right py-2 px-3">
+                                {typeof row.Amount === 'number' ? row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : row.Amount}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -832,14 +833,7 @@
 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      **Five distinct Excel files** will be downloaded:
-                      <ol className="list-decimal list-inside mt-1 space-y-0.5 font-semibold">
-                        <li>`1_Consolidated_Input_Category_A`</li>
-                        <li>`2_Consolidated_Input_Category_B`</li>
-                        <li>`3_Category_A_Analysis` (Sheets: Matched, Unmatched - *No Remark Column*)</li>
-                        <li>`4_Category_B_Analysis` (Sheets: Matched, Unmatched - *No Remark Column*)</li>
-                        <li><strong className="text-indigo-700">`5_Summary_Report` (Contains the custom-structured Category A and B summaries)</strong></li>
-                      </ol>
+                      **Five distinct Excel files** will be downloaded, including the **custom-structured summary for both Category A and Category B** in file 5. The output files retain **only the original columns**, **`Source_File`**, and **`Appearance_Count`** where applicable (the `Remark` column is excluded).
                     </p>
                   </div>
                 </div>
