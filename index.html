@@ -446,7 +446,7 @@
           const controlCheckAmount = sum2Amount - sum1Amount;
 
           return [
-              // Headers
+              // Headers (Used for Excel but excluded from web map filter)
               { Category: `${categoryLabel} Summary Metric`, Count: 'Count', Amount: 'Amount', isHeader: true },
               
               // Group 1: Based on Duplication (Input Totals)
@@ -471,6 +471,50 @@
                   isControl: true
               },
           ];
+      };
+      
+      /**
+       * Component to render a single structured summary table.
+       */
+      const SummaryTable = ({ metrics, category }) => {
+        const data = getStructuredSummaryData(metrics, category);
+
+        return (
+            <div className="bg-white p-4 rounded-lg shadow">
+                <h4 className="font-semibold text-base mb-3 text-indigo-700">{category} Summary</h4>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs sm:text-sm">
+                        <thead>
+                            <tr className="border-b-2 border-gray-300 bg-gray-50">
+                                <th className="text-left py-2 px-3 w-3/5">Metric</th>
+                                <th className="text-right py-2 px-3 w-1/5">Count</th>
+                                <th className="text-right py-2 px-3 w-1/5">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                          {data.filter(row => !row.isHeader).map((row, idx) => (
+                            <tr 
+                                key={idx} 
+                                className={`
+                                  ${row.isInputTotal || row.isTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : 'border-b border-gray-200'}
+                                  ${row.isControl ? 'bg-red-100 font-bold border-red-400 border-t-2' : ''}
+                                  ${row.Category === '' ? 'h-3 bg-gray-100 border-none' : ''}
+                                `}
+                            >
+                              <td className="py-1.5 px-3 whitespace-nowrap">{row.Category}</td>
+                              <td className="text-right py-1.5 px-3">
+                                {typeof row.Count === 'number' ? row.Count.toLocaleString() : row.Count}
+                              </td>
+                              <td className="text-right py-1.5 px-3">
+                                {typeof row.Amount === 'number' ? row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : row.Amount}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
       };
 
 
@@ -763,6 +807,7 @@
                     </div>
                   </div>
 
+                  {/* High-level Metrics */}
                   <div className="grid md:grid-cols-3 gap-4">
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                       <div className="flex items-center justify-between">
@@ -794,40 +839,15 @@
                     </div>
                   </div>
 
+                  {/* Structured Summary Tables */}
                   <div className="bg-gray-50 rounded-lg p-6">
-                    <h3 className="font-semibold text-lg mb-4">Structured Summary Preview (Category A)</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                            <tr className="border-b-2 border-gray-300">
-                                <th className="text-left py-2 px-3">Summary Metric</th>
-                                <th className="text-right py-2 px-3">Count</th>
-                                <th className="text-right py-2 px-3">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                          {/* Use the new structured summary logic for Category A display */}
-                          {getStructuredSummaryData(results.summaryMetricsA, 'Category A').filter(row => !row.isHeader).map((row, idx) => (
-                            <tr 
-                                key={idx} 
-                                className={`border-b border-gray-200 
-                                  ${row.isInputTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : ''}
-                                  ${row.isTotal && !row.isInputTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : ''}
-                                  ${row.isControl ? 'bg-red-100 font-bold border-red-400 border-t-2' : ''}
-                                  ${row.Category === '' ? 'h-4 bg-gray-100 border-none' : ''}
-                                `}
-                            >
-                              <td className="py-2 px-3">{row.Category}</td>
-                              <td className="text-right py-2 px-3">
-                                {typeof row.Count === 'number' ? row.Count.toLocaleString() : row.Count}
-                              </td>
-                              <td className="text-right py-2 px-3">
-                                {typeof row.Amount === 'number' ? row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : row.Amount}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Structured Summary</h3>
+                    <div className="grid md:grid-cols-2 gap-6">
+                        {/* Category A Summary */}
+                        <SummaryTable metrics={results.summaryMetricsA} category="Category A" />
+                        
+                        {/* Category B Summary */}
+                        <SummaryTable metrics={results.summaryMetricsB} category="Category B" />
                     </div>
                   </div>
 
