@@ -621,4 +621,263 @@
                           />
                           <div className="flex flex-col items-center py-6 text-gray-600">
                             <Upload size={48} className="mb-3 text-indigo-500" />
-                            <p className="font-medium">Click to upload
+                            <p className="font-medium">Click to upload</p>
+                            <p className="text-sm">Multiple Excel files accepted</p>
+                          </div>
+                        </label>
+                        {categoryAFiles.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {categoryAFiles.map((file, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                <div className="flex items-center">
+                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
+                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
+                                </div>
+                                <button onClick={() => removeFile(idx, 'A')} className="text-red-500 hover:text-red-700">
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
+                        <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category B</h3>
+                        <label className="cursor-pointer block">
+                          <input
+                            type="file"
+                            multiple
+                            accept=".xlsx,.xls"
+                            onChange={(e) => handleFileUpload(e, 'B')}
+                            className="hidden"
+                          />
+                          <div className="flex flex-col items-center py-6 text-gray-600">
+                            <Upload size={48} className="mb-3 text-indigo-500" />
+                            <p className="font-medium">Click to upload</p>
+                            <p className="text-sm">Multiple Excel files accepted</p>
+                          </div>
+                        </label>
+                        {categoryBFiles.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {categoryBFiles.map((file, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                <div className="flex items-center">
+                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
+                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
+                                </div>
+                                <button onClick={() => removeFile(idx, 'B')} className="text-red-500 hover:text-red-700">
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => setStep(2)}
+                      disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+                    >
+                      Next: Configure Columns
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === 2 && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold mb-4">Step 2: Configure Unique ID & Amount Columns</h2>
+                  
+                  <div className="grid md:grid-cols-2 gap-8">
+                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
+                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category A Configuration</h3>
+                      
+                      <IdComponentForm 
+                          config={uniqueIdConfigA}
+                          setConfig={setUniqueIdConfigA}
+                          availableColumns={availableColumnsA}
+                          category="A"
+                      />
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Amount Column (e.g., <span className="font-mono">{columnConfig.amountA || 'Select...'}</span>)
+                        </label>
+                        <select
+                          value={columnConfig.amountA}
+                          onChange={(e) => setColumnConfig({...columnConfig, amountA: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                          <option value="">Select amount column...</option>
+                          {availableColumnsA.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
+                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category B Configuration</h3>
+                      
+                      <IdComponentForm 
+                          config={uniqueIdConfigB}
+                          setConfig={setUniqueIdConfigB}
+                          availableColumns={availableColumnsB}
+                          category="B"
+                      />
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Amount Column (e.g., <span className="font-mono">{columnConfig.amountB || 'Select...'}</span>)
+                        </label>
+                        <select
+                          value={columnConfig.amountB}
+                          onChange={(e) => setColumnConfig({...columnConfig, amountB: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                          <option value="">Select amount column...</option>
+                          {availableColumnsB.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4" role="alert">
+                    <p className="font-bold">Matching Key Structure</p>
+                    <ul className="list-disc list-inside text-sm mt-1 space-y-0.5">
+                      <li>**Unique_ID_Original**: The base key (e.g., `ABC_123`) from your configured column fragments.</li>
+                      <li>**Appearance_Count**: Shows how many times `Unique_ID_Original` occurred in its source data (1, 2, 5, etc.).</li>
+                      <li>**Composite_ID**: The final key used for matching: `[Unique_ID_Original]`\_`[Match_Serial_No]` (e.g., `ABC_123_1`, `ABC_123_2`).</li>
+                    </ul>
+                  </div>
+
+
+                  <div className="flex justify-between">
+                    <button
+                      onClick={() => setStep(1)}
+                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={performReconciliation}
+                      disabled={processing || !isValidConfig}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+                    >
+                      {processing ? 'Processing...' : 'Process Reconciliation'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === 3 && results && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-semibold">Reconciliation Results</h2>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={downloadResults}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
+                      >
+                        <Download size={20} />
+                        Download Excel Report
+                      </button>
+                      <button
+                        onClick={resetApp}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
+                      >
+                        Start New Reconciliation
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-green-600 font-medium">Matched Records</p>
+                          <p className="text-2xl font-bold text-green-700">{results.matched.length}</p>
+                        </div>
+                        <CheckCircle size={32} />
+                      </div>
+                    </div>
+
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-orange-600 font-medium">Unmatched Category A</p>
+                          <p className="text-2xl font-bold text-orange-700">{results.unmatchedA.length}</p>
+                        </div>
+                        <AlertCircle size={32} />
+                      </div>
+                    </div>
+
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-red-600 font-medium">Unmatched Category B</p>
+                          <p className="text-2xl font-bold text-red-700">{results.unmatchedB.length}</p>
+                        </div>
+                        <AlertCircle size={32} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="font-semibold text-lg mb-4">Summary Report</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b-2 border-gray-300">
+                            <th className="text-left py-2 px-3">Category</th>
+                            <th className="text-right py-2 px-3">Count</th>
+                            <th className="text-right py-2 px-3">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {results.summary.map((row, idx) => (
+                            <tr key={idx} className={`border-b border-gray-200 ${idx >= 4 && idx < 10 ? 'bg-blue-50' : ''}`}>
+                              <td className="py-2 px-3">{row.Category}</td>
+                              <td className="text-right py-2 px-3">{row.Count.toLocaleString()}</td>
+                              <td className="text-right py-2 px-3">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm text-blue-800">
+                      <strong>Download includes:</strong>
+                      <ul className="list-disc list-inside mt-1 space-y-0.5">
+                        <li>**Summary_Report**</li>
+                        <li>**Consolidated_Records** (All A & B records with `Appearance_Count`)</li>
+                        <li>**Matched_Report**</li>
+                        <li>**Unmatched_Category_A** (Flagged if part of a 1:M/M:1 set)</li>
+                        <li>**Unmatched_Category_B** (Flagged if part of a 1:M/M:1 set)</li>
+                      </ul>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+    
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<ReconciliationApp />);
+
+    </script>
+</body>
+</html>
