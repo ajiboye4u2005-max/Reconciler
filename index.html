@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generalized Reconciliation Web App (Composite ID)</title>
+    <title>Generalized Reconciliation Web App (Composite ID & Dupe Count)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -73,13 +73,69 @@
                 return extractValue(value, c.position, c.length, c.start);
             });
             
-        // If no parts were configured, return a default ID based on row index/other fields to prevent total failure
         if (parts.length === 0) {
             return 'NO_ID_CONFIGURED'; 
         }
             
         // Concatenate parts with an underscore and convert to uppercase for standardization
         return parts.join('_').toUpperCase(); 
+    };
+
+    /**
+     * Filters the final dataset to include only original columns and essential reconciliation metadata.
+     * @param {Array<object>} data - The dataset (e.g., unmatchedA, matched).
+     * @param {Array<string>} originalColsA - Original columns from Category A.
+     * @param {Array<string>} originalColsB - Original columns from Category B.
+     * @param {string} amountColA - Name of the amount column in A.
+     * @param {string} amountColB - Name of the amount column in B.
+     * @param {string} reportType - 'A', 'B', 'Matched', or 'Consolidated'.
+     * @returns {Array<object>} Filtered data.
+     */
+    const filterOutputColumns = (data, originalColsA, originalColsB, amountColA, amountColB, reportType) => {
+        
+        const essentialCols = ['Source_File', 'Unique_ID_Original', 'Appearance_Count', 'Composite_ID', 'Match_Serial_No', 'Remark'];
+        
+        let colsToKeep = [];
+
+        if (reportType === 'A') {
+            // Keep original columns from A + essential cols
+            colsToKeep = [...essentialCols, ...originalColsA];
+        } else if (reportType === 'B') {
+            // Keep original columns from B + essential cols
+            colsToKeep = [...essentialCols, ...originalColsB];
+        } else if (reportType === 'Matched') {
+            // Keep original columns from A, original columns from B, all essential cols, and B's source file/amount
+            const originalColsSet = new Set([...originalColsA, ...originalColsB]);
+            colsToKeep = [...essentialCols, 'Source_File_B', ...Array.from(originalColsSet)];
+        } else if (reportType === 'Consolidated') {
+             // Keep original columns from A + B, essential cols + Category flag
+            const originalColsSet = new Set([...originalColsA, ...originalColsB]);
+            colsToKeep = ['Category', 'Source_File', 'Unique_ID_Original', 'Appearance_Count', ...Array.from(originalColsSet)];
+        }
+
+
+        // Remove duplicates and ensure a consistent order
+        const uniqueCols = Array.from(new Set(colsToKeep));
+        
+        // Final mapping and formatting
+        return data.map(row => {
+            const newRow = {};
+            uniqueCols.forEach(col => {
+                // Special mapping for the amount columns to keep the original name but ensure it's present
+                if (col === amountColA) {
+                    newRow[`Amount_Category_A (${amountColA})`] = row.Amount;
+                } else if (col === amountColB) {
+                    newRow[`Amount_Category_B (${amountColB})`] = row.Amount_Category_B || row.Amount;
+                } else {
+                    newRow[col] = row[col];
+                }
+            });
+            // Re-add Source_File_B if it's a matched report
+            if (reportType === 'Matched' && row.Source_File_B) {
+                 newRow['Source_File_B'] = row.Source_File_B;
+            }
+            return newRow;
+        });
     };
 
     // Component for configuring one segment of the Unique ID
@@ -190,7 +246,6 @@
       const [categoryAFiles, setCategoryAFiles] = useState([]);
       const [categoryBFiles, setCategoryBFiles] = useState([]);
       
-      // Updated state structure for complex ID config
       const [columnConfig, setColumnConfig] = useState({
         amountA: '',
         amountB: ''
@@ -198,8 +253,12 @@
       const [uniqueIdConfigA, setUniqueIdConfigA] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
       const [uniqueIdConfigB, setUniqueIdConfigB] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
 
+      // Store original columns for filtering output
+      const [originalColumnsA, setOriginalColumnsA] = useState([]);
+      const [originalColumnsB, setOriginalColumnsB] = useState([]);
       const [availableColumnsA, setAvailableColumnsA] = useState([]);
       const [availableColumnsB, setAvailableColumnsB] = useState([]);
+      
       const [processing, setProcessing] = useState(false);
       const [results, setResults] = useState(null);
       const [error, setError] = useState(null);
@@ -209,20 +268,19 @@
         if (category === 'A') {
           setCategoryAFiles(prev => [...prev, ...files]);
           if (files.length > 0 && availableColumnsA.length === 0) {
-            await extractColumns(files[0], setAvailableColumnsA);
+            await extractColumns(files[0], setAvailableColumnsA, setOriginalColumnsA);
           }
         } else {
           setCategoryBFiles(prev => [...prev, ...files]);
           if (files.length > 0 && availableColumnsB.length === 0) {
-            await extractColumns(files[0], setAvailableColumnsB);
+            await extractColumns(files[0], setAvailableColumnsB, setOriginalColumnsB);
           }
         }
       };
 
-      const extractColumns = async (file, setColumns) => {
+      const extractColumns = async (file, setAvailableColumns, setOriginalColumns) => {
         try {
           const data = await file.arrayBuffer();
-          // Use the globally available XLSX object
           const workbook = XLSX.read(data, { type: 'array' });
           
           const firstSheetName = workbook.SheetNames[0];
@@ -230,7 +288,9 @@
           
           const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
           if (jsonData.length > 0) {
-            setColumns(jsonData[0].filter(col => col));
+            const columns = jsonData[0].filter(col => col);
+            setAvailableColumns(columns);
+            setOriginalColumns(columns); // Store the full list of original columns
           }
         } catch (err) {
           console.error('Error reading file for columns:', err);
@@ -261,7 +321,7 @@
           } catch (err) {
             console.error(`Error reading ${file.name} data:`, err);
             setError(`Critical: Failed to read data from '${file.name}'. Please check the file's integrity.`);
-            return []; // Return empty array on critical failure
+            return []; 
           }
         }
         return allData;
@@ -295,12 +355,13 @@
           }
 
           // --- 1. Standardization and Initial Processing ---
-          const standardizeData = (data, idConfig, amountCol) => {
+          const standardizeData = (data, idConfig, amountCol, categoryLabel) => {
             return data.map(row => {
                 const uniqueIdBase = generateCompositeIdBase(row, idConfig);
                 
                 return {
-                    Unique_ID_Original: uniqueIdBase, // The concatenated value (e.g., ABC_123)
+                    Category: categoryLabel,
+                    Unique_ID_Original: uniqueIdBase.trim().toUpperCase(), 
                     Amount: parseFloat(row[amountCol]) || 0,
                     Source_File: row.Source_File,
                     ...row
@@ -308,24 +369,32 @@
             });
           };
 
-          const standardizedA = standardizeData(dataA, uniqueIdConfigA, columnConfig.amountA);
-          const standardizedB = standardizeData(dataB, uniqueIdConfigB, columnConfig.amountB);
+          const standardizedA = standardizeData(dataA, uniqueIdConfigA, columnConfig.amountA, 'Category_A');
+          const standardizedB = standardizeData(dataB, uniqueIdConfigB, columnConfig.amountB, 'Category_B');
 
+          // --- 2. Calculate Duplication Count ---
           const checkDuplicates = (data) => {
             const idCounts = {};
             data.forEach(row => {
               const id = row.Unique_ID_Original;
               idCounts[id] = (idCounts[id] || 0) + 1;
             });
+            // Add the count to each row
             return data.map(row => ({
               ...row,
+              Appearance_Count: idCounts[row.Unique_ID_Original], // New column added here
               Is_Duplicated_Set: idCounts[row.Unique_ID_Original] > 1
             }));
           };
 
           let processedA = checkDuplicates(standardizedA);
           let processedB = checkDuplicates(standardizedB);
+          
+          // --- 3. Create Consolidated Report (before serialization) ---
+          const consolidatedRecords = [...processedA, ...processedB];
 
+
+          // --- 4. Serialization (1 for many, many for one) ---
           const addCompositeIds = (data) => {
             const serialMap = {};
             return data.map(row => {
@@ -343,7 +412,7 @@
           processedA = addCompositeIds(processedA);
           processedB = addCompositeIds(processedB);
 
-          // --- 2. Reconciliation (Outer Join Logic) ---
+          // --- 5. Reconciliation (Outer Join Logic) ---
           const aMap = new Map(processedA.map(row => [row.Composite_ID, row]));
           const bMap = new Map(processedB.map(row => [row.Composite_ID, row]));
 
@@ -382,8 +451,7 @@
             }
           });
 
-          // --- 3. Summary Report Generation ---
-          // Use original standardized data for true totals before serialization
+          // --- 6. Summary Report Generation (using totals from before serialization) ---
           const totalA = standardizedA.reduce((sum, row) => sum + row.Amount, 0);
           const totalB = standardizedB.reduce((sum, row) => sum + row.Amount, 0);
           const matchedAmountA = matched.reduce((sum, row) => sum + row.Amount, 0);
@@ -396,19 +464,25 @@
             { Category: '1. Matched Items (Record_Category_A)', Count: matched.length, Amount: matchedAmountA },
             { Category: '2. Unmatched Items (Record_Category_A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
             { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
-            { Category: '4. Total Consolidated Record_Category_A', Count: processedA.length, Amount: totalA },
-            { Category: '5. Category A Difference (4 minus 3)', Count: processedA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
+            { Category: '4. Total Consolidated Record_Category_A', Count: standardizedA.length, Amount: totalA }, // Use original count/amount
+            { Category: '5. Category A Difference (4 minus 3)', Count: standardizedA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
             // Category B Audit Block
             { Category: '6. Matched Items (Record_Category_B)', Count: matched.length, Amount: matchedAmountB },
-            { Category: '7. Unmatched Items (Record_Category_B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
+            { Category: '7. Unmatched Items (Record_Category_B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
             { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
-            { Category: '9. Total Consolidated Record_Category_B', Count: processedB.length, Amount: totalB },
-            { Category: '10. Category B Difference (9 minus 8)', Count: processedB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
+            { Category: '9. Total Consolidated Record_Category_B', Count: standardizedB.length, Amount: totalB }, // Use original count/amount
+            { Category: '10. Category B Difference (9 minus 8)', Count: standardizedB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
             // Overall Variance
-            { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
+            { Category: '11. Overall Variance (A Total - B Total)', Count: (totalA - totalB), Amount: totalA - totalB }
           ];
 
-          setResults({ summary, matched, unmatchedA, unmatchedB });
+          setResults({ 
+              summary, 
+              matched, 
+              unmatchedA, 
+              unmatchedB,
+              consolidatedRecords,
+          });
           setStep(3);
         } catch (err) {
           setError(err.message);
@@ -424,24 +498,63 @@
         try {
           const wb = XLSX.utils.book_new();
           
+          // 1. Summary Report
           const summaryWS = XLSX.utils.json_to_sheet(results.summary);
           XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary_Report');
+
+          // 2. Consolidated Report (New Request)
+          const consolidatedData = filterOutputColumns(
+              results.consolidatedRecords, 
+              originalColumnsA, 
+              originalColumnsB, 
+              columnConfig.amountA, 
+              columnConfig.amountB, 
+              'Consolidated'
+          );
+          const consolidatedWS = XLSX.utils.json_to_sheet(consolidatedData);
+          XLSX.utils.book_append_sheet(wb, consolidatedWS, 'Consolidated_Records');
           
-          // Clean up matched report columns for download
-          const matchedForDownload = results.matched.map(({Composite_ID, Is_Duplicated_Set, Match_Serial_No, ...rest}) => rest);
-          const matchedWS = XLSX.utils.json_to_sheet(matchedForDownload);
+          // 3. Matched Report
+          const matchedData = filterOutputColumns(
+              results.matched, 
+              originalColumnsA, 
+              originalColumnsB, 
+              columnConfig.amountA, 
+              columnConfig.amountB, 
+              'Matched'
+          );
+          const matchedWS = XLSX.utils.json_to_sheet(matchedData);
           XLSX.utils.book_append_sheet(wb, matchedWS, 'Matched_Report');
           
-          const unmatchedAWS = XLSX.utils.json_to_sheet(results.unmatchedA);
+          // 4. Unmatched Category A Report
+          const unmatchedAData = filterOutputColumns(
+              results.unmatchedA, 
+              originalColumnsA, 
+              originalColumnsB, 
+              columnConfig.amountA, 
+              columnConfig.amountB, 
+              'A'
+          );
+          const unmatchedAWS = XLSX.utils.json_to_sheet(unmatchedAData);
           XLSX.utils.book_append_sheet(wb, unmatchedAWS, 'Unmatched_Category_A');
           
-          const unmatchedBWS = XLSX.utils.json_to_sheet(results.unmatchedB);
+          // 5. Unmatched Category B Report
+          const unmatchedBData = filterOutputColumns(
+              results.unmatchedB, 
+              originalColumnsA, 
+              originalColumnsB, 
+              columnConfig.amountA, 
+              columnConfig.amountB, 
+              'B'
+          );
+          const unmatchedBWS = XLSX.utils.json_to_sheet(unmatchedBData);
           XLSX.utils.book_append_sheet(wb, unmatchedBWS, 'Unmatched_Category_B');
           
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
           XLSX.writeFile(wb, `Reconciliation_Report_${timestamp}.xlsx`);
         } catch (err) {
           setError('Error generating Excel file: ' + err.message);
+          console.error('Download error:', err);
         }
       };
 
@@ -454,6 +567,8 @@
         setUniqueIdConfigB([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
         setAvailableColumnsA([]);
         setAvailableColumnsB([]);
+        setOriginalColumnsA([]);
+        setOriginalColumnsB([]);
         setResults(null);
         setError(null);
       };
@@ -506,254 +621,4 @@
                           />
                           <div className="flex flex-col items-center py-6 text-gray-600">
                             <Upload size={48} className="mb-3 text-indigo-500" />
-                            <p className="font-medium">Click to upload</p>
-                            <p className="text-sm">Multiple Excel files accepted</p>
-                          </div>
-                        </label>
-                        {categoryAFiles.length > 0 && (
-                          <div className="mt-4 space-y-2">
-                            {categoryAFiles.map((file, idx) => (
-                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                                <div className="flex items-center">
-                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
-                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
-                                </div>
-                                <button onClick={() => removeFile(idx, 'A')} className="text-red-500 hover:text-red-700">
-                                  <X size={16} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
-                        <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category B</h3>
-                        <label className="cursor-pointer block">
-                          <input
-                            type="file"
-                            multiple
-                            accept=".xlsx,.xls"
-                            onChange={(e) => handleFileUpload(e, 'B')}
-                            className="hidden"
-                          />
-                          <div className="flex flex-col items-center py-6 text-gray-600">
-                            <Upload size={48} className="mb-3 text-indigo-500" />
-                            <p className="font-medium">Click to upload</p>
-                            <p className="text-sm">Multiple Excel files accepted</p>
-                          </div>
-                        </label>
-                        {categoryBFiles.length > 0 && (
-                          <div className="mt-4 space-y-2">
-                            {categoryBFiles.map((file, idx) => (
-                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                                <div className="flex items-center">
-                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
-                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
-                                </div>
-                                <button onClick={() => removeFile(idx, 'B')} className="text-red-500 hover:text-red-700">
-                                  <X size={16} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => setStep(2)}
-                      disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0}
-                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
-                    >
-                      Next: Configure Columns
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === 2 && (
-                <div className="space-y-6">
-                  <h2 className="text-xl font-semibold mb-4">Step 2: Configure Unique ID & Amount Columns</h2>
-                  
-                  <div className="grid md:grid-cols-2 gap-8">
-                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
-                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category A Configuration</h3>
-                      
-                      <IdComponentForm 
-                          config={uniqueIdConfigA}
-                          setConfig={setUniqueIdConfigA}
-                          availableColumns={availableColumnsA}
-                          category="A"
-                      />
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Amount Column (<span className="font-mono">Amount_A</span>)
-                        </label>
-                        <select
-                          value={columnConfig.amountA}
-                          onChange={(e) => setColumnConfig({...columnConfig, amountA: e.target.value})}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        >
-                          <option value="">Select amount column...</option>
-                          {availableColumnsA.map(col => (
-                            <option key={col} value={col}>{col}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
-                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category B Configuration</h3>
-                      
-                      <IdComponentForm 
-                          config={uniqueIdConfigB}
-                          setConfig={setUniqueIdConfigB}
-                          availableColumns={availableColumnsB}
-                          category="B"
-                      />
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Amount Column (<span className="font-mono">Amount_B</span>)
-                        </label>
-                        <select
-                          value={columnConfig.amountB}
-                          onChange={(e) => setColumnConfig({...columnConfig, amountB: e.target.value})}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        >
-                          <option value="">Select amount column...</option>
-                          {availableColumnsB.map(col => (
-                            <option key={col} value={col}>{col}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4" role="alert">
-                    <p className="font-bold">Composite ID Preview</p>
-                    <p className="text-sm">The matching key will look like: **[Extracted_Value_1]**\_**[Extracted_Value_2]**\_**[Serial_Number]**</p>
-                  </div>
-
-
-                  <div className="flex justify-between">
-                    <button
-                      onClick={() => setStep(1)}
-                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={performReconciliation}
-                      disabled={processing || !isValidConfig}
-                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
-                    >
-                      {processing ? 'Processing...' : 'Process Reconciliation'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === 3 && results && (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">Reconciliation Results</h2>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={downloadResults}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
-                      >
-                        <Download size={20} />
-                        Download Excel Report
-                      </button>
-                      <button
-                        onClick={resetApp}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
-                      >
-                        Start New Reconciliation
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-green-600 font-medium">Matched Records</p>
-                          <p className="text-2xl font-bold text-green-700">{results.matched.length}</p>
-                        </div>
-                        <CheckCircle size={32} />
-                      </div>
-                    </div>
-
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-orange-600 font-medium">Unmatched Category A</p>
-                          <p className="text-2xl font-bold text-orange-700">{results.unmatchedA.length}</p>
-                        </div>
-                        <AlertCircle size={32} />
-                      </div>
-                    </div>
-
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-red-600 font-medium">Unmatched Category B</p>
-                          <p className="text-2xl font-bold text-red-700">{results.unmatchedB.length}</p>
-                        </div>
-                        <AlertCircle size={32} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <h3 className="font-semibold text-lg mb-4">Summary Report</h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b-2 border-gray-300">
-                            <th className="text-left py-2 px-3">Category</th>
-                            <th className="text-right py-2 px-3">Count</th>
-                            <th className="text-right py-2 px-3">Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {results.summary.map((row, idx) => (
-                            <tr key={idx} className={`border-b border-gray-200 ${idx >= 4 && idx < 10 ? 'bg-blue-50' : ''}`}>
-                              <td className="py-2 px-3">{row.Category}</td>
-                              <td className="text-right py-2 px-3">{row.Count.toLocaleString()}</td>
-                              <td className="text-right py-2 px-3">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-sm text-blue-800">
-                      <strong>Note:</strong> The complete reconciliation report with all matched and unmatched records has been generated. 
-                      The **Unmatched** reports now include the column `Is_Duplicated_Set`, which is set to **True** for any record 
-                      that was part of a 1:M or M:1 serialization grouping, even if it ultimately didn't find a match.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    };
-    
-    const container = document.getElementById('root');
-    const root = ReactDOM.createRoot(container);
-    root.render(<ReconciliationApp />);
-
-    </script>
-</body>
-</html>
+                            <p className="font-medium">Click to upload
