@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generalized Reconciliation Web App (Composite ID & Dupe Count)</title>
+    <title>Advanced Reconciliation Tool (Strict Column Output)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -33,11 +33,6 @@
 
     /**
      * Helper function to extract a substring based on position, length, and start index.
-     * @param {any} value - The raw cell value.
-     * @param {string} position - 'Left', 'Right', or 'Middle'.
-     * @param {number} length - Number of characters to extract.
-     * @param {number} start - Start position (1-based) for 'Middle' extraction.
-     * @returns {string} The extracted substring.
      */
     const extractValue = (value, position, length, start) => {
         if (value === null || value === undefined) return '';
@@ -61,9 +56,6 @@
     
     /**
      * Generates the Unique_ID_Original (the concatenated base ID) from a row and configuration.
-     * @param {object} row - The data row.
-     * @param {Array<object>} config - The array of ID component configuration objects.
-     * @returns {string} The concatenated unique ID base.
      */
     const generateCompositeIdBase = (row, config) => {
         const parts = config
@@ -77,68 +69,33 @@
             return 'NO_ID_CONFIGURED'; 
         }
             
-        // Concatenate parts with an underscore and convert to uppercase for standardization
         return parts.join('_').toUpperCase(); 
     };
 
     /**
-     * Filters the final dataset to include only original columns and essential reconciliation metadata.
-     * @param {Array<object>} data - The dataset (e.g., unmatchedA, matched).
-     * @param {Array<string>} originalColsA - Original columns from Category A.
-     * @param {Array<string>} originalColsB - Original columns from Category B.
-     * @param {string} amountColA - Name of the amount column in A.
-     * @param {string} amountColB - Name of the amount column in B.
-     * @param {string} reportType - 'A', 'B', 'Matched', or 'Consolidated'.
-     * @returns {Array<object>} Filtered data.
+     * Filters and orders the data according to the strict column requirements.
+     * Only includes original columns, Source_File, and Appearance_Count.
      */
-    const filterOutputColumns = (data, originalColsA, originalColsB, amountColA, amountColB, reportType) => {
+    const filterOutputColumns = (data, originalCols) => {
+        // Build the required header list in order: Source_File, all Original Columns, Appearance_Count.
+        // Internal fields (Unique_ID_Original, Composite_ID, Internal_Amount, Category, Is_Duplicated_Set, Match_Serial_No) are excluded.
+        // The 'Remark' column is explicitly excluded as requested.
+        const requiredHeaders = ['Source_File', ...originalCols, 'Appearance_Count']; 
         
-        const essentialCols = ['Source_File', 'Unique_ID_Original', 'Appearance_Count', 'Composite_ID', 'Match_Serial_No', 'Remark'];
-        
-        let colsToKeep = [];
-
-        if (reportType === 'A') {
-            // Keep original columns from A + essential cols
-            colsToKeep = [...essentialCols, ...originalColsA];
-        } else if (reportType === 'B') {
-            // Keep original columns from B + essential cols
-            colsToKeep = [...essentialCols, ...originalColsB];
-        } else if (reportType === 'Matched') {
-            // Keep original columns from A, original columns from B, all essential cols, and B's source file/amount
-            const originalColsSet = new Set([...originalColsA, ...originalColsB]);
-            colsToKeep = [...essentialCols, 'Source_File_B', ...Array.from(originalColsSet)];
-        } else if (reportType === 'Consolidated') {
-             // Keep original columns from A + B, essential cols + Category flag
-            const originalColsSet = new Set([...originalColsA, ...originalColsB]);
-            colsToKeep = ['Category', 'Source_File', 'Unique_ID_Original', 'Appearance_Count', ...Array.from(originalColsSet)];
-        }
-
-
         // Remove duplicates and ensure a consistent order
-        const uniqueCols = Array.from(new Set(colsToKeep));
+        const finalCols = requiredHeaders.filter(c => c).filter((value, index, self) => self.indexOf(value) === index);
         
-        // Final mapping and formatting
+        // Process data rows
         return data.map(row => {
-            const newRow = {};
-            uniqueCols.forEach(col => {
-                // Special mapping for the amount columns to keep the original name but ensure it's present
-                if (col === amountColA) {
-                    newRow[`Amount_Category_A (${amountColA})`] = row.Amount;
-                } else if (col === amountColB) {
-                    newRow[`Amount_Category_B (${amountColB})`] = row.Amount_Category_B || row.Amount;
-                } else {
-                    newRow[col] = row[col];
-                }
+            const outputRow = {};
+            finalCols.forEach(col => {
+                 outputRow[col] = row[col];
             });
-            // Re-add Source_File_B if it's a matched report
-            if (reportType === 'Matched' && row.Source_File_B) {
-                 newRow['Source_File_B'] = row.Source_File_B;
-            }
-            return newRow;
+            return outputRow;
         });
     };
 
-    // Component for configuring one segment of the Unique ID
+    // Component for configuring one segment of the Unique ID 
     const IdComponentForm = ({ config, setConfig, availableColumns, category }) => {
         const updateComponent = (id, field, value) => {
             setConfig(prev => prev.map(c => 
@@ -253,7 +210,6 @@
       const [uniqueIdConfigA, setUniqueIdConfigA] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
       const [uniqueIdConfigB, setUniqueIdConfigB] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
 
-      // Store original columns for filtering output
       const [originalColumnsA, setOriginalColumnsA] = useState([]);
       const [originalColumnsB, setOriginalColumnsB] = useState([]);
       const [availableColumnsA, setAvailableColumnsA] = useState([]);
@@ -358,13 +314,14 @@
           const standardizeData = (data, idConfig, amountCol, categoryLabel) => {
             return data.map(row => {
                 const uniqueIdBase = generateCompositeIdBase(row, idConfig);
-                
+                const amountValue = parseFloat(row[amountCol]) || 0;
+
                 return {
+                    ...row, 
                     Category: categoryLabel,
                     Unique_ID_Original: uniqueIdBase.trim().toUpperCase(), 
-                    Amount: parseFloat(row[amountCol]) || 0,
                     Source_File: row.Source_File,
-                    ...row
+                    Internal_Amount: amountValue 
                 };
             });
           };
@@ -372,17 +329,17 @@
           const standardizedA = standardizeData(dataA, uniqueIdConfigA, columnConfig.amountA, 'Category_A');
           const standardizedB = standardizeData(dataB, uniqueIdConfigB, columnConfig.amountB, 'Category_B');
 
-          // --- 2. Calculate Duplication Count ---
+          // --- 2. Calculate Duplication Count & Duplication Flag ---
           const checkDuplicates = (data) => {
             const idCounts = {};
             data.forEach(row => {
               const id = row.Unique_ID_Original;
               idCounts[id] = (idCounts[id] || 0) + 1;
             });
-            // Add the count to each row
+            
             return data.map(row => ({
               ...row,
-              Appearance_Count: idCounts[row.Unique_ID_Original], // New column added here
+              Appearance_Count: idCounts[row.Unique_ID_Original],
               Is_Duplicated_Set: idCounts[row.Unique_ID_Original] > 1
             }));
           };
@@ -390,11 +347,8 @@
           let processedA = checkDuplicates(standardizedA);
           let processedB = checkDuplicates(standardizedB);
           
-          // --- 3. Create Consolidated Report (before serialization) ---
-          const consolidatedRecords = [...processedA, ...processedB];
-
-
-          // --- 4. Serialization (1 for many, many for one) ---
+          // --- 3. Serialization (1 for many, many for one) ---
+          // This creates the Match_Serial_No and Composite_ID used for accurate matching
           const addCompositeIds = (data) => {
             const serialMap = {};
             return data.map(row => {
@@ -403,7 +357,6 @@
               return {
                 ...row,
                 Match_Serial_No: serialMap[id],
-                // The final match key (e.g., ABC_123_1, ABC_123_2)
                 Composite_ID: `${id}_${serialMap[id]}` 
               };
             });
@@ -412,76 +365,67 @@
           processedA = addCompositeIds(processedA);
           processedB = addCompositeIds(processedB);
 
-          // --- 5. Reconciliation (Outer Join Logic) ---
-          const aMap = new Map(processedA.map(row => [row.Composite_ID, row]));
+          // --- 4. Reconciliation (Outer Join Logic) ---
           const bMap = new Map(processedB.map(row => [row.Composite_ID, row]));
 
-          const matched = [];
+          const matchedA = [];
+          const matchedB = [];
           const unmatchedA = [];
           const unmatchedB = [];
 
           processedA.forEach(rowA => {
             const rowB = bMap.get(rowA.Composite_ID);
+            
             if (rowB) {
-              const isExcess = rowA.Is_Duplicated_Set || rowB.Is_Duplicated_Set;
-              matched.push({
-                ...rowA,
-                Amount_Category_B: rowB.Amount,
-                Source_File_B: rowB.Source_File,
-                Remark: isExcess ? 'Matched - Part of a 1:M or M:1 Set' : 'Matched - 1:1 Line Item'
-              });
+                // MATCHED
+                // Pushing the raw record, filtering will handle column restriction
+                matchedA.push({...rowA}); 
+                matchedB.push({...rowB});
+                
+                // Remove the matched item from B-Map to prevent it being added to unmatchedB later
+                bMap.delete(rowA.Composite_ID); 
             } else {
-              unmatchedA.push({
-                ...rowA,
-                Remark: rowA.Is_Duplicated_Set 
-                    ? 'Unmatched in Record_Category_B (Part of a 1:M or M:1 Set in A)'
-                    : 'Unmatched in Record_Category_B'
-              });
+                // UNMATCHED A
+                unmatchedA.push({...rowA});
             }
           });
 
-          processedB.forEach(rowB => {
-            if (!aMap.has(rowB.Composite_ID)) {
-              unmatchedB.push({
-                ...rowB,
-                Remark: rowB.Is_Duplicated_Set 
-                    ? 'Unmatched in Record_Category_A (Part of a 1:M or M:1 Set in B)'
-                    : 'Unmatched in Record_Category_A'
-              });
-            }
+          // Any remaining items in bMap are unmatched B items
+          bMap.forEach(rowB => {
+            unmatchedB.push({...rowB});
           });
 
-          // --- 6. Summary Report Generation (using totals from before serialization) ---
-          const totalA = standardizedA.reduce((sum, row) => sum + row.Amount, 0);
-          const totalB = standardizedB.reduce((sum, row) => sum + row.Amount, 0);
-          const matchedAmountA = matched.reduce((sum, row) => sum + row.Amount, 0);
-          const matchedAmountB = matched.reduce((sum, row) => sum + row.Amount_Category_B, 0);
-          const unmatchedAmountA = unmatchedA.reduce((sum, row) => sum + row.Amount, 0);
-          const unmatchedAmountB = unmatchedB.reduce((sum, row) => sum + row.Amount, 0);
-
-          const summary = [
-            // Category A Audit Block
-            { Category: '1. Matched Items (Record_Category_A)', Count: matched.length, Amount: matchedAmountA },
-            { Category: '2. Unmatched Items (Record_Category_A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
-            { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
-            { Category: '4. Total Consolidated Record_Category_A', Count: standardizedA.length, Amount: totalA }, // Use original count/amount
-            { Category: '5. Category A Difference (4 minus 3)', Count: standardizedA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
-            // Category B Audit Block
-            { Category: '6. Matched Items (Record_Category_B)', Count: matched.length, Amount: matchedAmountB },
-            { Category: '7. Unmatched Items (Record_Category_B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
-            { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
-            { Category: '9. Total Consolidated Record_Category_B', Count: standardizedB.length, Amount: totalB }, // Use original count/amount
-            { Category: '10. Category B Difference (9 minus 8)', Count: standardizedB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
-            // Overall Variance
-            { Category: '11. Overall Variance (A Total - B Total)', Count: (totalA - totalB), Amount: totalA - totalB }
+          // --- 5. Summary Report Generation ---
+          const totalA = standardizedA.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          const totalB = standardizedB.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          const matchedAmountA = matchedA.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          const matchedAmountB = matchedB.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          const unmatchedAmountA = unmatchedA.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          const unmatchedAmountB = unmatchedB.reduce((sum, row) => sum + row.Internal_Amount, 0);
+          
+          // Full Summary
+          const fullSummary = [
+              { Category: '1. Matched Items (Record_Category_A)', Count: matchedA.length, Amount: matchedAmountA },
+              { Category: '2. Unmatched Items (Record_Category_A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
+              { Category: '3. Total Matched & Unmatched (A)', Count: matchedA.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
+              { Category: '4. Total Consolidated Record_Category_A', Count: standardizedA.length, Amount: totalA },
+              { Category: '5. Category A Difference (4 minus 3)', Count: standardizedA.length - (matchedA.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
+              { Category: '6. Matched Items (Record_Category_B)', Count: matchedB.length, Amount: matchedAmountB },
+              { Category: '7. Unmatched Items (Record_Category_B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
+              { Category: '8. Total Matched & Unmatched (B)', Count: matchedB.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
+              { Category: '9. Total Consolidated Record_Category_B', Count: standardizedB.length, Amount: totalB },
+              { Category: '10. Category B Difference (9 minus 8)', Count: standardizedB.length - (matchedB.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
+              { Category: '11. Overall Variance (A Total - B Total)', Count: (totalA - totalB), Amount: totalA - totalB }
           ];
 
           setResults({ 
-              summary, 
-              matched, 
+              summary: fullSummary, 
+              matchedA, 
+              matchedB,
               unmatchedA, 
               unmatchedB,
-              consolidatedRecords,
+              processedA_data: processedA, 
+              processedB_data: processedB, 
           });
           setStep(3);
         } catch (err) {
@@ -494,68 +438,51 @@
 
       const downloadResults = async () => {
         if (!results) return;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
 
-        try {
-          const wb = XLSX.utils.book_new();
-          
-          // 1. Summary Report
-          const summaryWS = XLSX.utils.json_to_sheet(results.summary);
-          XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary_Report');
+        // --- Core Data Preparation (Applying strict column filter) ---
+        const matchedA_data = filterOutputColumns(results.matchedA, originalColumnsA);
+        const unmatchedA_data = filterOutputColumns(results.unmatchedA, originalColumnsA);
+        const matchedB_data = filterOutputColumns(results.matchedB, originalColumnsB);
+        const unmatchedB_data = filterOutputColumns(results.unmatchedB, originalColumnsB);
 
-          // 2. Consolidated Report (New Request)
-          const consolidatedData = filterOutputColumns(
-              results.consolidatedRecords, 
-              originalColumnsA, 
-              originalColumnsB, 
-              columnConfig.amountA, 
-              columnConfig.amountB, 
-              'Consolidated'
-          );
-          const consolidatedWS = XLSX.utils.json_to_sheet(consolidatedData);
-          XLSX.utils.book_append_sheet(wb, consolidatedWS, 'Consolidated_Records');
-          
-          // 3. Matched Report
-          const matchedData = filterOutputColumns(
-              results.matched, 
-              originalColumnsA, 
-              originalColumnsB, 
-              columnConfig.amountA, 
-              columnConfig.amountB, 
-              'Matched'
-          );
-          const matchedWS = XLSX.utils.json_to_sheet(matchedData);
-          XLSX.utils.book_append_sheet(wb, matchedWS, 'Matched_Report');
-          
-          // 4. Unmatched Category A Report
-          const unmatchedAData = filterOutputColumns(
-              results.unmatchedA, 
-              originalColumnsA, 
-              originalColumnsB, 
-              columnConfig.amountA, 
-              columnConfig.amountB, 
-              'A'
-          );
-          const unmatchedAWS = XLSX.utils.json_to_sheet(unmatchedAData);
-          XLSX.utils.book_append_sheet(wb, unmatchedAWS, 'Unmatched_Category_A');
-          
-          // 5. Unmatched Category B Report
-          const unmatchedBData = filterOutputColumns(
-              results.unmatchedB, 
-              originalColumnsA, 
-              originalColumnsB, 
-              columnConfig.amountA, 
-              columnConfig.amountB, 
-              'B'
-          );
-          const unmatchedBWS = XLSX.utils.json_to_sheet(unmatchedBData);
-          XLSX.utils.book_append_sheet(wb, unmatchedBWS, 'Unmatched_Category_B');
-          
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-          XLSX.writeFile(wb, `Reconciliation_Report_${timestamp}.xlsx`);
-        } catch (err) {
-          setError('Error generating Excel file: ' + err.message);
-          console.error('Download error:', err);
-        }
+        // --- Summary Split ---
+        const summaryA = results.summary.filter(r => r.Category.includes('(A)') || r.Category.includes('Total Consolidated Record_Category_A') || r.Category === '11. Overall Variance (A Total - B Total)');
+        const summaryB = results.summary.filter(r => r.Category.includes('(B)') || r.Category.includes('Total Consolidated Record_Category_B') || r.Category === '11. Overall Variance (A Total - B Total)');
+
+
+        // --- 1. Consolidated Category A Input File ---
+        const dataA_consolidated = filterOutputColumns(results.processedA_data, originalColumnsA);
+        const wb1 = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb1, XLSX.utils.json_to_sheet(dataA_consolidated), 'Consolidated_A_Input');
+        XLSX.writeFile(wb1, `1_Consolidated_Input_Category_A_${timestamp}.xlsx`);
+
+        // --- 2. Consolidated Category B Input File ---
+        const dataB_consolidated = filterOutputColumns(results.processedB_data, originalColumnsB);
+        const wb2 = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(dataB_consolidated), 'Consolidated_B_Input');
+        XLSX.writeFile(wb2, `2_Consolidated_Input_Category_B_${timestamp}.xlsx`);
+
+        // --- 3. Category A Analysis File (Matched A + Unmatched A) ---
+        const wb3 = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(matchedA_data), 'Matched_Items');
+        XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(unmatchedA_data), 'Unmatched_Items');
+        XLSX.writeFile(wb3, `3_Category_A_Analysis_${timestamp}.xlsx`);
+
+        // --- 4. Category B Analysis File (Matched B + Unmatched B) ---
+        const wb4 = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(matchedB_data), 'Matched_Items');
+        XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(unmatchedB_data), 'Unmatched_Items');
+        XLSX.writeFile(wb4, `4_Category_B_Analysis_${timestamp}.xlsx`);
+        
+        // --- 5. Summary Report File (Summary A + Summary B) ---
+        const wb5 = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(summaryA), 'Category_A_Summary');
+        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(summaryB), 'Category_B_Summary');
+        XLSX.writeFile(wb5, `5_Summary_Report_${timestamp}.xlsx`);
+
+        // Notify user
+        alert('Reconciliation complete! Five separate Excel files have been downloaded.');
       };
 
       const resetApp = () => {
@@ -578,7 +505,7 @@
           <div className="max-w-7xl mx-auto">
             <div className="bg-white rounded-lg shadow-xl p-8">
               <h1 className="text-3xl font-bold text-gray-800 mb-2">Advanced Records Reconciliation Tool</h1>
-              <p className="text-gray-600 mb-6">Create a composite Unique ID from multiple column fragments to enable precise 1:1 matching and handle 1:M/M:1 serialization.</p>
+              <p className="text-gray-600 mb-6">Create a composite Unique ID from multiple column fragments for 1:1 and 1:M/M:1 matching.</p>
 
               <div className="flex items-center justify-between mb-8">
                 {[1, 2, 3].map((s) => (
@@ -605,6 +532,7 @@
 
               {step === 1 && (
                 <div className="space-y-6">
+                  {/* ... Step 1 UI (File Upload) ... */}
                   <div>
                     <h2 className="text-xl font-semibold mb-4">Step 1: Upload Excel Files</h2>
                     
@@ -676,7 +604,6 @@
                       </div>
                     </div>
                   </div>
-
                   <div className="flex justify-end">
                     <button
                       onClick={() => setStep(2)}
@@ -752,9 +679,8 @@
                   <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4" role="alert">
                     <p className="font-bold">Matching Key Structure</p>
                     <ul className="list-disc list-inside text-sm mt-1 space-y-0.5">
-                      <li>**Unique_ID_Original**: The base key (e.g., `ABC_123`) from your configured column fragments.</li>
-                      <li>**Appearance_Count**: Shows how many times `Unique_ID_Original` occurred in its source data (1, 2, 5, etc.).</li>
-                      <li>**Composite_ID**: The final key used for matching: `[Unique_ID_Original]`\_`[Match_Serial_No]` (e.g., `ABC_123_1`, `ABC_123_2`).</li>
+                      <li>The **`Appearance_Count`** column shows how many times the base ID (e.g., `ABC_123`) was found in its source file.</li>
+                      <li>The tool maintains a **serialized ID** internally to ensure correct 1:1, 1:M, and M:1 matching.</li>
                     </ul>
                   </div>
 
@@ -787,7 +713,7 @@
                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
                       >
                         <Download size={20} />
-                        Download Excel Report
+                        Download 5 Excel Reports
                       </button>
                       <button
                         onClick={resetApp}
@@ -802,13 +728,12 @@
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm text-green-600 font-medium">Matched Records</p>
-                          <p className="text-2xl font-bold text-green-700">{results.matched.length}</p>
+                          <p className="text-sm text-green-600 font-medium">Total Matched Records (A/B Sides)</p>
+                          <p className="text-2xl font-bold text-green-700">{results.matchedA.length}</p>
                         </div>
                         <CheckCircle size={32} />
                       </div>
                     </div>
-
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                       <div className="flex items-center justify-between">
                         <div>
@@ -831,7 +756,7 @@
                   </div>
 
                   <div className="bg-gray-50 rounded-lg p-6">
-                    <h3 className="font-semibold text-lg mb-4">Summary Report</h3>
+                    <h3 className="font-semibold text-lg mb-4">Summary Report Preview</h3>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
@@ -856,14 +781,14 @@
 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      <strong>Download includes:</strong>
-                      <ul className="list-disc list-inside mt-1 space-y-0.5">
-                        <li>**Summary_Report**</li>
-                        <li>**Consolidated_Records** (All A & B records with `Appearance_Count`)</li>
-                        <li>**Matched_Report**</li>
-                        <li>**Unmatched_Category_A** (Flagged if part of a 1:M/M:1 set)</li>
-                        <li>**Unmatched_Category_B** (Flagged if part of a 1:M/M:1 set)</li>
-                      </ul>
+                      **Five distinct Excel files** will be downloaded, each containing **only the original columns**, **`Source_File`**, and **`Appearance_Count`** where applicable:
+                      <ol className="list-decimal list-inside mt-1 space-y-0.5 font-semibold">
+                        <li>`1_Consolidated_Input_Category_A`</li>
+                        <li>`2_Consolidated_Input_Category_B`</li>
+                        <li>`3_Category_A_Analysis` (Sheets: Matched, Unmatched)</li>
+                        <li>`4_Category_B_Analysis` (Sheets: Matched, Unmatched)</li>
+                        <li>`5_Summary_Report` (Sheets: Category A Summary, Category B Summary)</li>
+                      </ol>
                     </p>
                   </div>
                 </div>
