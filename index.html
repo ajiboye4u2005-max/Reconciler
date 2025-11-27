@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Records Reconciliation Tool</title>
+    <title>Records Reconciliation Tool (Optimized)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -35,8 +35,52 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // Import icons from lucide-react (using a direct CDN link)
-        const { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Download, X } = lucide; 
+        // =========================================================================
+        // ROBUST ICON DEFINITIONS (FIX for blank page issue)
+        // These inline SVGs ensure icons work without external Lucide-React dependencies.
+        // =========================================================================
+
+        const Icon = ({ children, size = 24, className = '', color = 'currentColor' }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={size} 
+                height={size} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke={color} 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className}
+            >
+                {children}
+            </svg>
+        );
+
+        const Upload = (props) => (
+            <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Icon>
+        );
+
+        const FileSpreadsheet = (props) => (
+            <Icon {...props}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 21h8"/><path d="M8 17h8"/><path d="M8 13h8"/><path d="M8 9h8"/></Icon>
+        );
+        
+        const AlertCircle = (props) => (
+            <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></Icon>
+        );
+        
+        const CheckCircle = (props) => (
+            <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Icon>
+        );
+        
+        const Download = (props) => (
+            <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Icon>
+        );
+        
+        const X = (props) => (
+            <Icon {...props}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>
+        );
+
 
         // Main React Component
         const ReconciliationApp = () => {
@@ -60,7 +104,6 @@
                 const files = Array.from(e.target.files);
                 if (category === 'A') {
                     setCategoryAFiles(prev => [...prev, ...files]);
-                    // Only extract columns from the first file for setup
                     if (files.length > 0 && availableColumnsA.length === 0) {
                         await extractColumns(files[0], setAvailableColumnsA);
                     }
@@ -80,10 +123,8 @@
                     const data = await file.arrayBuffer();
                     const workbook = XLSX.read(data, { type: 'array' });
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                    // Read only the header row (header: 1)
                     const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
                     if (jsonData.length > 0) {
-                        // Filter out empty columns
                         setColumns(jsonData[0].filter(col => col));
                     }
                 } catch (err) {
@@ -111,9 +152,6 @@
                         const data = await file.arrayBuffer();
                         const workbook = XLSX.read(data, { type: 'array' });
                         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                        
-                        // NOTE ON LARGE DATA: For very large files, this step still loads the whole sheet.
-                        // The memory optimization happens immediately after, in performReconciliation.
                         const jsonData = XLSX.utils.sheet_to_json(firstSheet);
                         jsonData.forEach(row => row.Source_File = file.name);
                         allData.push(...jsonData);
@@ -161,7 +199,7 @@
                         Source_File: row.Source_File,
                     }));
 
-                    // Function to check for duplicates in the standardized data
+                    // Function to check for duplicates
                     const checkDuplicates = (data) => {
                         const idCounts = {};
                         data.forEach(row => {
@@ -211,17 +249,14 @@
                             matched.push({
                                 Composite_ID: rowA.Composite_ID,
                                 Match_Serial_No: rowA.Match_Serial_No,
-                                
                                 Unique_ID_A: rowA.Unique_ID_Original,
                                 Amount_A: rowA.Amount,
                                 Source_File_A: rowA.Source_File,
                                 Is_Duplicated_A: rowA.Is_Duplicated,
-
                                 Unique_ID_B: rowB.Unique_ID_Original,
                                 Amount_B: rowB.Amount,
                                 Source_File_B: rowB.Source_File,
                                 Is_Duplicated_B: rowB.Is_Duplicated,
-                                
                                 Remark: isExcess ? 'Matched - Excess (1:M or M:1 Line)' : 'Matched - 1:1 Line Item'
                             });
                             // Remove B record from map to ensure it's not processed as unmatched later
@@ -240,7 +275,6 @@
                     });
 
                     // --- UNMATCHED B ---
-                    // Any remaining items in bMap are unmatched in A
                     bMap.forEach(rowB => {
                         unmatchedB.push({
                             Unique_ID_Original: rowB.Unique_ID_Original,
@@ -302,7 +336,6 @@
                     const summaryWS = XLSX.utils.json_to_sheet(results.summary);
                     XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary_Report');
                     
-                    // Create sheets for detailed reports
                     const matchedWS = XLSX.utils.json_to_sheet(results.matched);
                     XLSX.utils.book_append_sheet(wb, matchedWS, 'Matched_Report');
                     
