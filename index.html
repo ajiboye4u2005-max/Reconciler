@@ -36,8 +36,7 @@
 
     <script type="text/babel">
         // =========================================================================
-        // ROBUST ICON DEFINITIONS (FIX for blank page issue)
-        // These inline SVGs ensure icons work without external Lucide-React dependencies.
+        // ROBUST ICON DEFINITIONS
         // =========================================================================
 
         const Icon = ({ children, size = 24, className = '', color = 'currentColor' }) => (
@@ -99,50 +98,73 @@
             const [results, setResults] = React.useState(null);
             const [error, setError] = React.useState(null);
 
-            // Function to handle file uploads
             const handleFileUpload = async (e, category) => {
                 const files = Array.from(e.target.files);
+                
+                // Clear the error and potentially old columns when new files are uploaded
+                setError(null);
+                if (category === 'A' && availableColumnsA.length > 0) setAvailableColumnsA([]);
+                if (category === 'B' && availableColumnsB.length > 0) setAvailableColumnsB([]);
+
                 if (category === 'A') {
                     setCategoryAFiles(prev => [...prev, ...files]);
-                    if (files.length > 0 && availableColumnsA.length === 0) {
+                    if (files.length > 0) {
                         await extractColumns(files[0], setAvailableColumnsA);
                     }
                 } else {
                     setCategoryBFiles(prev => [...prev, ...files]);
-                    if (files.length > 0 && availableColumnsB.length === 0) {
+                    if (files.length > 0) {
                         await extractColumns(files[0], setAvailableColumnsB);
                     }
                 }
             };
 
-            // Function to read the header row from a file
+            // Enhanced function to read the header row from a file
             const extractColumns = async (file, setColumns) => {
                 try {
-                    // Lazy load SheetJS for reading Excel files
                     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
                     const data = await file.arrayBuffer();
                     const workbook = XLSX.read(data, { type: 'array' });
-                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-                    if (jsonData.length > 0) {
-                        setColumns(jsonData[0].filter(col => col));
+                    
+                    if (workbook.SheetNames.length === 0) {
+                         throw new Error(`The file "${file.name}" contains no sheets. Ensure data is present.`);
                     }
+
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    // Attempt to convert the first row to JSON
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                    
+                    if (jsonData.length === 0 || jsonData[0].length === 0) {
+                        throw new Error(`The first sheet of "${file.name}" appears empty or has no header row.`);
+                    }
+
+                    setColumns(jsonData[0].filter(col => col));
+                    setError(null); // Clear error if successful
                 } catch (err) {
-                    console.error('Error reading file:', err);
-                    setError('Error reading Excel file. Please ensure it is a valid Excel file.');
+                    // Specific error message when file reading fails
+                    console.error('File extraction error:', err);
+                    setColumns([]);
+                    setError(`Error reading file "${file.name}". Please ensure it is a valid, uncorrupted, and unpassworded Excel (.xlsx or .xls) file.`);
                 }
             };
 
-            // Function to remove an uploaded file
             const removeFile = (index, category) => {
                 if (category === 'A') {
-                    setCategoryAFiles(prev => prev.filter((_, i) => i !== index));
+                    setCategoryAFiles(prev => {
+                        const newFiles = prev.filter((_, i) => i !== index);
+                        if (newFiles.length === 0) setAvailableColumnsA([]);
+                        return newFiles;
+                    });
                 } else {
-                    setCategoryBFiles(prev => prev.filter((_, i) => i !== index));
+                    setCategoryBFiles(prev => {
+                        const newFiles = prev.filter((_, i) => i !== index);
+                        if (newFiles.length === 0) setAvailableColumnsB([]);
+                        return newFiles;
+                    });
                 }
+                setError(null);
             };
 
-            // Function to read all files for a category
             const readExcelFiles = async (files) => {
                 const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
                 const allData = [];
@@ -156,13 +178,14 @@
                         jsonData.forEach(row => row.Source_File = file.name);
                         allData.push(...jsonData);
                     } catch (err) {
-                        console.error(`Error reading ${file.name}:`, err);
+                        console.error(`Error reading ${file.name} during processing:`, err);
+                        // Do not re-throw error here, as one corrupt file shouldn't stop processing of others, 
+                        // but the initial extraction must succeed for column setup.
                     }
                 }
                 return allData;
             };
 
-            // Main reconciliation logic
             const performReconciliation = async () => {
                 setProcessing(true);
                 setError(null);
@@ -180,13 +203,10 @@
                     const dataB = await readExcelFiles(categoryBFiles);
 
                     if (dataA.length === 0 || dataB.length === 0) {
-                        throw new Error('No data found in uploaded files');
+                        throw new Error('No data found in uploaded files or files were corrupted/unreadable.');
                     }
                     
-                    // 🚨 CRITICAL MEMORY OPTIMIZATION FOR LARGE DATA (8GB RAM) 🚨
-                    // This is the key optimization: only the required columns (ID, Amount, Source File)
-                    // are copied to the new standardized arrays. All other columns are dropped from
-                    // the working memory, saving significant space.
+                    // 🚨 CRITICAL MEMORY OPTIMIZATION 🚨
                     const standardizedA = dataA.map(row => ({
                         Unique_ID_Original: String(row[columnConfig.uniqueIdA] || ''),
                         Amount: parseFloat(row[columnConfig.amountA]) || 0,
@@ -199,7 +219,7 @@
                         Source_File: row.Source_File,
                     }));
 
-                    // Function to check for duplicates
+                    // --- Reconciliation Logic (Unchanged) ---
                     const checkDuplicates = (data) => {
                         const idCounts = {};
                         data.forEach(row => {
@@ -215,7 +235,6 @@
                     let processedA = checkDuplicates(standardizedA);
                     let processedB = checkDuplicates(standardizedB);
 
-                    // Function to create a Composite ID (Original ID + Serial Number) to handle duplicates
                     const addCompositeIds = (data) => {
                         const serialMap = {};
                         return data.map(row => {
@@ -232,7 +251,6 @@
                     processedA = addCompositeIds(processedA);
                     processedB = addCompositeIds(processedB);
 
-                    // Create Maps for efficient O(1) lookups
                     const aMap = new Map(processedA.map(row => [row.Composite_ID, row]));
                     const bMap = new Map(processedB.map(row => [row.Composite_ID, row]));
 
@@ -240,55 +258,33 @@
                     const unmatchedA = [];
                     const unmatchedB = [];
 
-                    // --- MATCHING ---
                     processedA.forEach(rowA => {
                         const rowB = bMap.get(rowA.Composite_ID);
                         const isExcess = rowA.Is_Duplicated || (rowB && rowB.Is_Duplicated);
                         
                         if (rowB) {
                             matched.push({
-                                Composite_ID: rowA.Composite_ID,
-                                Match_Serial_No: rowA.Match_Serial_No,
-                                Unique_ID_A: rowA.Unique_ID_Original,
-                                Amount_A: rowA.Amount,
-                                Source_File_A: rowA.Source_File,
-                                Is_Duplicated_A: rowA.Is_Duplicated,
-                                Unique_ID_B: rowB.Unique_ID_Original,
-                                Amount_B: rowB.Amount,
-                                Source_File_B: rowB.Source_File,
-                                Is_Duplicated_B: rowB.Is_Duplicated,
+                                Composite_ID: rowA.Composite_ID, Match_Serial_No: rowA.Match_Serial_No, Unique_ID_A: rowA.Unique_ID_Original, Amount_A: rowA.Amount, Source_File_A: rowA.Source_File, Is_Duplicated_A: rowA.Is_Duplicated,
+                                Unique_ID_B: rowB.Unique_ID_Original, Amount_B: rowB.Amount, Source_File_B: rowB.Source_File, Is_Duplicated_B: rowB.Is_Duplicated,
                                 Remark: isExcess ? 'Matched - Excess (1:M or M:1 Line)' : 'Matched - 1:1 Line Item'
                             });
-                            // Remove B record from map to ensure it's not processed as unmatched later
                             bMap.delete(rowA.Composite_ID);
                         } else {
                             unmatchedA.push({
-                                Unique_ID_Original: rowA.Unique_ID_Original,
-                                Amount: rowA.Amount,
-                                Source_File: rowA.Source_File,
-                                Match_Serial_No: rowA.Match_Serial_No,
-                                Composite_ID: rowA.Composite_ID,
-                                Is_Duplicated: rowA.Is_Duplicated,
+                                Unique_ID_Original: rowA.Unique_ID_Original, Amount: rowA.Amount, Source_File: rowA.Source_File, Match_Serial_No: rowA.Match_Serial_No, Composite_ID: rowA.Composite_ID, Is_Duplicated: rowA.Is_Duplicated,
                                 Remark: 'Unmatched in Record_Category_B'
                             });
                         }
                     });
 
-                    // --- UNMATCHED B ---
                     bMap.forEach(rowB => {
                         unmatchedB.push({
-                            Unique_ID_Original: rowB.Unique_ID_Original,
-                            Amount: rowB.Amount,
-                            Source_File: rowB.Source_File,
-                            Match_Serial_No: rowB.Match_Serial_No,
-                            Composite_ID: rowB.Composite_ID,
-                            Is_Duplicated: rowB.Is_Duplicated,
+                            Unique_ID_Original: rowB.Unique_ID_Original, Amount: rowB.Amount, Source_File: rowB.Source_File, Match_Serial_No: rowB.Match_Serial_No, Composite_ID: rowB.Composite_ID, Is_Duplicated: rowB.Is_Duplicated,
                             Remark: 'Unmatched in Record_Category_A'
                         });
                     });
 
-
-                    // --- SUMMARY CALCULATIONS ---
+                    // --- Summary Calculations (Unchanged) ---
                     const totalA = processedA.reduce((sum, row) => sum + row.Amount, 0);
                     const totalB = processedB.reduce((sum, row) => sum + row.Amount, 0);
                     const matchedAmountA = matched.reduce((sum, row) => sum + row.Amount_A, 0);
@@ -325,7 +321,6 @@
                 }
             };
 
-            // Function to download results as an Excel file
             const downloadResults = async () => {
                 if (!results) return;
 
@@ -352,7 +347,6 @@
                 }
             };
 
-            // Function to reset the application state
             const resetApp = () => {
                 setStep(1);
                 setCategoryAFiles([]);
@@ -364,7 +358,6 @@
                 setError(null);
             };
 
-            // --- RENDERED HTML STRUCTURE (JSX) ---
             return (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
                     <div className="max-w-6xl mx-auto">
@@ -472,7 +465,7 @@
                                     <div className="flex justify-end">
                                         <button
                                             onClick={() => setStep(2)}
-                                            disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0}
+                                            disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || availableColumnsA.length === 0 || availableColumnsB.length === 0 || error}
                                             className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
                                         >
                                             Next: Configure Columns
@@ -660,7 +653,7 @@
 
                                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                         <p className="text-sm text-blue-800">
-                                            <strong>Optimization Note:</strong> This application processed the files by keeping only the **Unique ID**, **Amount**, and **Source File** in active memory, which successfully reduces the memory footprint and addresses the "unable to read data" error for large datasets on systems with limited RAM.
+                                            <strong>Optimization Note:</strong> This application successfully reduces the memory footprint by processing only the **Unique ID**, **Amount**, and **Source File** from the Excel data.
                                         </p>
                                     </div>
                                 </div>
@@ -671,7 +664,6 @@
             );
         };
 
-        // Render the component
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
         root.render(<ReconciliationApp />);
