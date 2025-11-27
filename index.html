@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Structured Summary Output)</title>
+    <title>Advanced Reconciliation Tool (Layered ID Extraction)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -32,25 +32,41 @@
     const { useState, useMemo } = React;
 
     /**
-     * Helper function to extract a substring based on position, length, and start index.
+     * Helper function for advanced value extraction: 
+     * 1. Optional Text-to-Column split.
+     * 2. Positional extraction (Left/Right/Middle).
      */
-    const extractValue = (value, position, length, start) => {
+    const extractValueAdvanced = (value, config) => {
         if (value === null || value === undefined) return '';
-        const str = String(value).trim();
+        let str = String(value).trim();
+
+        // 1. Text-to-Column Pre-processing
+        if (config.extractionMode === 'TextToColumn' && config.separator) {
+            const separator = String(config.separator);
+            const parts = str.split(separator);
+            
+            // splitIndex is 1-based, convert to 0-based for array access
+            const index = (parseInt(config.splitIndex) || 1) - 1; 
+            
+            // Update the string to be the selected segment, or empty if out of bounds
+            str = parts[index] !== undefined ? String(parts[index]).trim() : '';
+        }
+
+        // 2. Existing Positional Extraction (Left/Right/Middle)
         if (str.length === 0) return '';
         
-        const len = parseInt(length) || str.length;
+        const len = parseInt(config.length) || str.length;
         
-        switch (position) {
+        switch (config.position) {
             case 'Left':
                 return str.substring(0, len);
             case 'Right':
                 return str.substring(str.length - len);
             case 'Middle':
-                const startIndex = (parseInt(start) || 1) - 1; // Convert 1-based index to 0-based
+                const startIndex = (parseInt(config.start) || 1) - 1; // Convert 1-based index to 0-based
                 return str.substring(startIndex, startIndex + len);
             default:
-                return str;
+                return str; // Should not happen with current config
         }
     };
     
@@ -62,7 +78,8 @@
             .filter(c => c.column && c.column !== '') 
             .map(c => {
                 const value = row[c.column];
-                return extractValue(value, c.position, c.length, c.start);
+                // Use the new advanced extraction logic
+                return extractValueAdvanced(value, c); 
             });
             
         if (parts.length === 0) {
@@ -74,11 +91,11 @@
 
     /**
      * Filters and orders the data according to the strict column requirements.
-     * Only includes original columns, Source_File, and Appearance_Count.
+     * Includes Composite_ID and Appearance_Count.
      */
     const filterOutputColumns = (data, originalCols) => {
-        // Build the required header list in order: Source_File, all Original Columns, Appearance_Count.
-        const requiredHeaders = ['Source_File', ...originalCols, 'Appearance_Count']; 
+        // ADDED 'Composite_ID' to the required headers list.
+        const requiredHeaders = ['Source_File', ...originalCols, 'Composite_ID', 'Appearance_Count']; 
         
         const finalCols = requiredHeaders.filter(c => c).filter((value, index, self) => self.indexOf(value) === index);
         
@@ -94,6 +111,17 @@
 
     // Component for configuring one segment of the Unique ID 
     const IdComponentForm = ({ config, setConfig, availableColumns, category }) => {
+        const defaultComponent = { 
+            id: Date.now(), 
+            column: '', 
+            extractionMode: 'Direct', 
+            separator: '|', // Default separator
+            splitIndex: 1, 
+            position: 'Left', 
+            length: 5, 
+            start: 1 
+        };
+
         const updateComponent = (id, field, value) => {
             setConfig(prev => prev.map(c => 
                 c.id === id ? { ...c, [field]: value } : c
@@ -101,7 +129,7 @@
         };
 
         const addComponent = () => {
-            setConfig(prev => [...prev, { id: Date.now(), column: '', position: 'Left', length: 5, start: 1 }]);
+            setConfig(prev => [...prev, defaultComponent]);
         };
 
         const removeComponent = (id) => {
@@ -128,7 +156,8 @@
                              )}
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                            {/* Source Column */}
                             <div>
                                 <label className="block text-xs font-medium text-gray-700 mb-1">Source Column</label>
                                 <select
@@ -142,7 +171,59 @@
                                     ))}
                                 </select>
                             </div>
-                            
+
+                            {/* Extraction Mode (New) */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Extraction Mode</label>
+                                <select
+                                    value={c.extractionMode}
+                                    onChange={(e) => updateComponent(c.id, 'extractionMode', e.target.value)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="Direct">Direct (Left/Right/Middle)</option>
+                                    <option value="TextToColumn">Text-to-Column + Extract</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Text-to-Column Fields (Conditional) */}
+                        {c.extractionMode === 'TextToColumn' && (
+                             <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">1. Separator (Delimiter)</label>
+                                    <input
+                                        type="text"
+                                        value={c.separator}
+                                        onChange={(e) => updateComponent(c.id, 'separator', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="e.g., | or -"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">2. Segment Index (1-based)</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={c.splitIndex}
+                                        onChange={(e) => updateComponent(c.id, 'splitIndex', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="e.g., 2 for the second part"
+                                    />
+                                </div>
+                                <div className="md:col-span-2 text-xs text-blue-800 italic">
+                                    <p>The system first splits the Source Column by the Separator, then uses the content of the Segment Index.</p>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Positional Extraction Fields (Always shown, applied to the result of step 1) */}
+                        <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 ${c.extractionMode === 'TextToColumn' ? 'pt-2 border-t' : ''}`}>
+                            <div className="md:col-span-4">
+                                <span className="block text-xs font-bold text-gray-700 mb-1">
+                                    {c.extractionMode === 'TextToColumn' ? '3. Apply Positional Extraction to Segment' : 'Apply Positional Extraction to Column'}
+                                </span>
+                            </div>
+
                             <div>
                                 <label className="block text-xs font-medium text-gray-700 mb-1">Extraction Position</label>
                                 <select
@@ -150,23 +231,26 @@
                                     onChange={(e) => updateComponent(c.id, 'position', e.target.value)}
                                     className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                                 >
+                                    <option value="All">All Characters</option>
                                     <option value="Left">Left</option>
                                     <option value="Right">Right</option>
                                     <option value="Middle">Middle</option>
                                 </select>
                             </div>
                             
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Length</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    value={c.length}
-                                    onChange={(e) => updateComponent(c.id, 'length', e.target.value)}
-                                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="Length"
-                                />
-                            </div>
+                            {(c.position === 'Left' || c.position === 'Right' || c.position === 'Middle') && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Length</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={c.length}
+                                        onChange={(e) => updateComponent(c.id, 'length', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                        placeholder="Length"
+                                    />
+                                </div>
+                            )}
 
                             {c.position === 'Middle' && (
                                 <div>
@@ -196,6 +280,17 @@
     };
 
     const ReconciliationApp = () => {
+      const defaultIdConfig = { 
+            id: 1, 
+            column: '', 
+            extractionMode: 'Direct', 
+            separator: '|', 
+            splitIndex: 1, 
+            position: 'Left', 
+            length: 5, 
+            start: 1 
+      };
+
       const [step, setStep] = useState(1);
       const [categoryAFiles, setCategoryAFiles] = useState([]);
       const [categoryBFiles, setCategoryBFiles] = useState([]);
@@ -204,8 +299,8 @@
         amountA: '',
         amountB: ''
       });
-      const [uniqueIdConfigA, setUniqueIdConfigA] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
-      const [uniqueIdConfigB, setUniqueIdConfigB] = useState([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
+      const [uniqueIdConfigA, setUniqueIdConfigA] = useState([defaultIdConfig]);
+      const [uniqueIdConfigB, setUniqueIdConfigB] = useState([defaultIdConfig]);
 
       const [originalColumnsA, setOriginalColumnsA] = useState([]);
       const [originalColumnsB, setOriginalColumnsB] = useState([]);
@@ -446,7 +541,7 @@
           const controlCheckAmount = sum2Amount - sum1Amount;
 
           return [
-              // Headers (Used for Excel but excluded from web map filter)
+              // Headers
               { Category: `${categoryLabel} Summary Metric`, Count: 'Count', Amount: 'Amount', isHeader: true },
               
               // Group 1: Based on Duplication (Input Totals)
@@ -523,6 +618,7 @@
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
 
         // --- Core Data Preparation (Applying strict column filter) ---
+        // filterOutputColumns now correctly includes 'Composite_ID'
         const matchedA_data = filterOutputColumns(results.matchedA, originalColumnsA);
         const unmatchedA_data = filterOutputColumns(results.unmatchedA, originalColumnsA);
         const matchedB_data = filterOutputColumns(results.matchedB, originalColumnsB);
@@ -573,8 +669,8 @@
         setCategoryAFiles([]);
         setCategoryBFiles([]);
         setColumnConfig({ amountA: '', amountB: '' });
-        setUniqueIdConfigA([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
-        setUniqueIdConfigB([{ id: 1, column: '', position: 'Left', length: 5, start: 1 }]);
+        setUniqueIdConfigA([defaultIdConfig]);
+        setUniqueIdConfigB([defaultIdConfig]);
         setAvailableColumnsA([]);
         setAvailableColumnsB([]);
         setOriginalColumnsA([]);
@@ -588,7 +684,7 @@
           <div className="max-w-7xl mx-auto">
             <div className="bg-white rounded-lg shadow-xl p-8">
               <h1 className="text-3xl font-bold text-gray-800 mb-2">Advanced Records Reconciliation Tool</h1>
-              <p className="text-gray-600 mb-6">Create a composite Unique ID from multiple column fragments for 1:1 and 1:M/M:1 matching.</p>
+              <p className="text-gray-600 mb-6">Create a composite Unique ID using multi-step (Text-to-Column + Extraction) logic for accurate matching.</p>
 
               <div className="flex items-center justify-between mb-8">
                 {[1, 2, 3].map((s) => (
@@ -615,7 +711,6 @@
 
               {step === 1 && (
                 <div className="space-y-6">
-                  {/* ... Step 1 UI (File Upload) ... */}
                   <div>
                     <h2 className="text-xl font-semibold mb-4">Step 1: Upload Excel Files</h2>
                     
@@ -762,8 +857,8 @@
                   <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4" role="alert">
                     <p className="font-bold">Matching Key Structure</p>
                     <ul className="list-disc list-inside text-sm mt-1 space-y-0.5">
-                      <li>The **`Appearance_Count`** column shows how many times the base ID (e.g., `ABC_123`) was found in its source file.</li>
-                      <li>The tool maintains a **serialized ID** internally to ensure correct 1:1, 1:M, and M:1 matching.</li>
+                      <li>The **`Appearance_Count`** shows how many times the base ID (`Unique_ID_Original`) was found in its source file.</li>
+                      <li>The **`Composite_ID`** (included in all output reports) is the actual serialized key used for matching (Base ID + occurrence number).</li>
                     </ul>
                   </div>
 
@@ -853,7 +948,7 @@
 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      **Five distinct Excel files** will be downloaded, including the **custom-structured summary for both Category A and Category B** in file 5. The output files retain **only the original columns**, **`Source_File`**, and **`Appearance_Count`** where applicable (the `Remark` column is excluded).
+                      **Five distinct Excel files** will be downloaded, including the **custom-structured summary for both Category A and Category B** in file 5. The output files now include the key **`Composite_ID`** column, along with **`Source_File`** and **`Appearance_Count`**.
                     </p>
                   </div>
                 </div>
