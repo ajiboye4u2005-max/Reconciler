@@ -3,671 +3,1029 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Records Reconciliation Tool (Optimized)</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    
+    <title>Advanced Reconciliation Tool (Layered ID Extraction)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <style>
-        /* Custom scrollbar style for better visibility of large reports */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-thumb {
-            background-color: #a7a7a7;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background-color: #888888;
-        }
-        ::-webkit-scrollbar-track {
-            background-color: #f1f1f1;
-        }
-    </style>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-
     <div id="root"></div>
 
     <script type="text/babel">
-        // =========================================================================
-        // ROBUST ICON DEFINITIONS
-        // =========================================================================
+    
+    // --- ICON PLACEHOLDERS ---
+    const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
+        <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
+    );
+    const Upload = (props) => <IconWrapper {...props}><span role="img" aria-label="Upload">⤒</span></IconWrapper>;
+    const FileSpreadsheet = (props) => <IconWrapper {...props}><span role="img" aria-label="Spreadsheet">📊</span></IconWrapper>;
+    const AlertCircle = (props) => <IconWrapper {...props} color="rgb(234 88 12)"><span role="img" aria-label="Alert">⚠️</span></IconWrapper>;
+    const CheckCircle = (props) => <IconWrapper {...props} color="rgb(22 163 74)"><span role="img" aria-label="Check">✅</span></IconWrapper>;
+    const Download = (props) => <IconWrapper {...props}><span role="img" aria-label="Download">⬇️</span></IconWrapper>;
+    const X = (props) => <IconWrapper {...props}><span role="img" aria-label="Close">✖️</span></IconWrapper>;
+    const Plus = (props) => <IconWrapper {...props}><span role="img" aria-label="Add">+</span></IconWrapper>;
+    const Minus = (props) => <IconWrapper {...props}><span role="img" aria-label="Remove">-</span></IconWrapper>;
+    // --- END ICON PLACEHOLDERS ---
+    
+    const { useState, useMemo } = React;
 
-        const Icon = ({ children, size = 24, className = '', color = 'currentColor' }) => (
-            <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width={size} 
-                height={size} 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke={color} 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                className={className}
-            >
-                {children}
-            </svg>
-        );
+    /**
+     * Helper function for advanced value extraction: 
+     * 1. Optional Text-to-Column split.
+     * 2. Positional extraction (Left/Right/Middle).
+     */
+    const extractValueAdvanced = (value, config) => {
+        if (value === null || value === undefined) return '';
+        let str = String(value).trim();
 
-        const Upload = (props) => (
-            <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Icon>
-        );
+        // 1. Text-to-Column Pre-processing
+        if (config.extractionMode === 'TextToColumn' && config.separator) {
+            const separator = String(config.separator);
+            const parts = str.split(separator);
+            
+            // splitIndex is 1-based, convert to 0-based for array access
+            const index = (parseInt(config.splitIndex) || 1) - 1; 
+            
+            // Update the string to be the selected segment, or empty if out of bounds
+            str = parts[index] !== undefined ? String(parts[index]).trim() : '';
+        }
 
-        const FileSpreadsheet = (props) => (
-            <Icon {...props}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 21h8"/><path d="M8 17h8"/><path d="M8 13h8"/><path d="M8 9h8"/></Icon>
-        );
+        // 2. Existing Positional Extraction (Left/Right/Middle/All)
+        if (str.length === 0) return '';
         
-        const AlertCircle = (props) => (
-            <Icon {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></Icon>
-        );
+        const len = parseInt(config.length) || str.length;
         
-        const CheckCircle = (props) => (
-            <Icon {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></Icon>
-        );
-        
-        const Download = (props) => (
-            <Icon {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Icon>
-        );
-        
-        const X = (props) => (
-            <Icon {...props}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>
-        );
-
-
-        // Main React Component
-        const ReconciliationApp = () => {
-            const [step, setStep] = React.useState(1);
-            const [categoryAFiles, setCategoryAFiles] = React.useState([]);
-            const [categoryBFiles, setCategoryBFiles] = React.useState([]);
-            const [columnConfig, setColumnConfig] = React.useState({
-                uniqueIdA: '',
-                uniqueIdB: '',
-                amountA: '',
-                amountB: ''
+        switch (config.position) {
+            case 'Left':
+                return str.substring(0, len);
+            case 'Right':
+                return str.substring(str.length - len);
+            case 'Middle':
+                const startIndex = (parseInt(config.start) || 1) - 1; // Convert 1-based index to 0-based
+                return str.substring(startIndex, startIndex + len);
+            case 'All':
+            default:
+                return str; 
+        }
+    };
+    
+    /**
+     * Generates the Unique_ID_Original (the concatenated base ID) from a row and configuration.
+     */
+    const generateCompositeIdBase = (row, config) => {
+        const parts = config
+            .filter(c => c.column && c.column !== '') 
+            .map(c => {
+                const value = row[c.column];
+                // Use the new advanced extraction logic
+                return extractValueAdvanced(value, c); 
             });
-            const [availableColumnsA, setAvailableColumnsA] = React.useState([]);
-            const [availableColumnsB, setAvailableColumnsB] = React.useState([]);
-            const [processing, setProcessing] = React.useState(false);
-            const [results, setResults] = React.useState(null);
-            const [error, setError] = React.useState(null);
+            
+        if (parts.length === 0) {
+            return 'NO_ID_CONFIGURED'; 
+        }
+            
+        return parts.join('_').toUpperCase(); 
+    };
 
-            const handleFileUpload = async (e, category) => {
-                const files = Array.from(e.target.files);
-                
-                // Clear the error and potentially old columns when new files are uploaded
-                setError(null);
-                if (category === 'A' && availableColumnsA.length > 0) setAvailableColumnsA([]);
-                if (category === 'B' && availableColumnsB.length > 0) setAvailableColumnsB([]);
+    /**
+     * Filters and orders the data according to the strict column requirements.
+     * Includes Composite_ID and Appearance_Count.
+     */
+    const filterOutputColumns = (data, originalCols) => {
+        // ADDED 'Composite_ID' to the required headers list.
+        const requiredHeaders = ['Source_File', ...originalCols, 'Composite_ID', 'Appearance_Count']; 
+        
+        const finalCols = requiredHeaders.filter(c => c).filter((value, index, self) => self.indexOf(value) === index);
+        
+        // Process data rows
+        return data.map(row => {
+            const outputRow = {};
+            finalCols.forEach(col => {
+                 outputRow[col] = row[col];
+            });
+            return outputRow;
+        });
+    };
 
-                if (category === 'A') {
-                    setCategoryAFiles(prev => [...prev, ...files]);
-                    if (files.length > 0) {
-                        await extractColumns(files[0], setAvailableColumnsA);
-                    }
-                } else {
-                    setCategoryBFiles(prev => [...prev, ...files]);
-                    if (files.length > 0) {
-                        await extractColumns(files[0], setAvailableColumnsB);
-                    }
-                }
-            };
+    // Component for configuring one segment of the Unique ID 
+    const IdComponentForm = ({ config, setConfig, availableColumns, category }) => {
+        const defaultComponent = { 
+            id: Date.now(), 
+            column: '', 
+            extractionMode: 'Direct', 
+            separator: '|', // Default separator
+            splitIndex: 1, 
+            position: 'Left', 
+            length: 5, 
+            start: 1 
+        };
 
-            // Enhanced function to read the header row from a file
-            const extractColumns = async (file, setColumns) => {
-                try {
-                    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
-                    const data = await file.arrayBuffer();
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    
-                    if (workbook.SheetNames.length === 0) {
-                         throw new Error(`The file "${file.name}" contains no sheets. Ensure data is present.`);
-                    }
+        const updateComponent = (id, field, value) => {
+            setConfig(prev => prev.map(c => 
+                c.id === id ? { ...c, [field]: value } : c
+            ));
+        };
 
-                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                    // Attempt to convert the first row to JSON
-                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-                    
-                    if (jsonData.length === 0 || jsonData[0].length === 0) {
-                        throw new Error(`The first sheet of "${file.name}" appears empty or has no header row.`);
-                    }
+        const addComponent = () => {
+            setConfig(prev => [...prev, defaultComponent]);
+        };
 
-                    setColumns(jsonData[0].filter(col => col));
-                    setError(null); // Clear error if successful
-                } catch (err) {
-                    // Specific error message when file reading fails
-                    console.error('File extraction error:', err);
-                    setColumns([]);
-                    setError(`Error reading file "${file.name}". Please ensure it is a valid, uncorrupted, and unpassworded Excel (.xlsx or .xls) file.`);
-                }
-            };
+        const removeComponent = (id) => {
+            setConfig(prev => prev.filter(c => c.id !== id));
+        };
 
-            const removeFile = (index, category) => {
-                if (category === 'A') {
-                    setCategoryAFiles(prev => {
-                        const newFiles = prev.filter((_, i) => i !== index);
-                        if (newFiles.length === 0) setAvailableColumnsA([]);
-                        return newFiles;
-                    });
-                } else {
-                    setCategoryBFiles(prev => {
-                        const newFiles = prev.filter((_, i) => i !== index);
-                        if (newFiles.length === 0) setAvailableColumnsB([]);
-                        return newFiles;
-                    });
-                }
-                setError(null);
-            };
+        return (
+            <div className="space-y-4">
+                <h3 className="font-semibold text-lg text-indigo-700">Unique ID Components ({category})</h3>
+                <p className="text-sm text-gray-600 italic">Combine characters from multiple columns to form the unique matching key, separated by '_'.</p>
 
-            const readExcelFiles = async (files) => {
-                const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
-                const allData = [];
-                
-                for (const file of files) {
-                    try {
-                        const data = await file.arrayBuffer();
-                        const workbook = XLSX.read(data, { type: 'array' });
-                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-                        jsonData.forEach(row => row.Source_File = file.name);
-                        allData.push(...jsonData);
-                    } catch (err) {
-                        console.error(`Error reading ${file.name} during processing:`, err);
-                        // Do not re-throw error here, as one corrupt file shouldn't stop processing of others, 
-                        // but the initial extraction must succeed for column setup.
-                    }
-                }
-                return allData;
-            };
-
-            const performReconciliation = async () => {
-                setProcessing(true);
-                setError(null);
-
-                try {
-                    if (categoryAFiles.length === 0 || categoryBFiles.length === 0) {
-                        throw new Error('Please upload files for both categories');
-                    }
-                    if (!columnConfig.uniqueIdA || !columnConfig.uniqueIdB || 
-                        !columnConfig.amountA || !columnConfig.amountB) {
-                        throw new Error('Please specify all column names');
-                    }
-
-                    const dataA = await readExcelFiles(categoryAFiles);
-                    const dataB = await readExcelFiles(categoryBFiles);
-
-                    if (dataA.length === 0 || dataB.length === 0) {
-                        throw new Error('No data found in uploaded files or files were corrupted/unreadable.');
-                    }
-                    
-                    // 🚨 CRITICAL MEMORY OPTIMIZATION 🚨
-                    const standardizedA = dataA.map(row => ({
-                        Unique_ID_Original: String(row[columnConfig.uniqueIdA] || ''),
-                        Amount: parseFloat(row[columnConfig.amountA]) || 0,
-                        Source_File: row.Source_File,
-                    }));
-
-                    const standardizedB = dataB.map(row => ({
-                        Unique_ID_Original: String(row[columnConfig.uniqueIdB] || ''),
-                        Amount: parseFloat(row[columnConfig.amountB]) || 0,
-                        Source_File: row.Source_File,
-                    }));
-
-                    // --- Reconciliation Logic (Unchanged) ---
-                    const checkDuplicates = (data) => {
-                        const idCounts = {};
-                        data.forEach(row => {
-                            const id = row.Unique_ID_Original;
-                            idCounts[id] = (idCounts[id] || 0) + 1;
-                        });
-                        return data.map(row => ({
-                            ...row,
-                            Is_Duplicated: idCounts[row.Unique_ID_Original] > 1
-                        }));
-                    };
-
-                    let processedA = checkDuplicates(standardizedA);
-                    let processedB = checkDuplicates(standardizedB);
-
-                    const addCompositeIds = (data) => {
-                        const serialMap = {};
-                        return data.map(row => {
-                            const id = row.Unique_ID_Original;
-                            serialMap[id] = (serialMap[id] || 0) + 1;
-                            return {
-                                ...row,
-                                Match_Serial_No: serialMap[id],
-                                Composite_ID: `${id}_${serialMap[id]}`
-                            };
-                        });
-                    };
-
-                    processedA = addCompositeIds(processedA);
-                    processedB = addCompositeIds(processedB);
-
-                    const aMap = new Map(processedA.map(row => [row.Composite_ID, row]));
-                    const bMap = new Map(processedB.map(row => [row.Composite_ID, row]));
-
-                    const matched = [];
-                    const unmatchedA = [];
-                    const unmatchedB = [];
-
-                    processedA.forEach(rowA => {
-                        const rowB = bMap.get(rowA.Composite_ID);
-                        const isExcess = rowA.Is_Duplicated || (rowB && rowB.Is_Duplicated);
+                {config.map((c, index) => (
+                    <div key={c.id} className="bg-white border border-indigo-200 p-4 rounded-lg shadow-sm space-y-3">
+                        <div className="flex justify-between items-center border-b pb-2">
+                             <span className="font-medium text-gray-700">Component {index + 1}</span>
+                             {config.length > 1 && (
+                                <button 
+                                    onClick={() => removeComponent(c.id)} 
+                                    className="text-red-500 hover:text-red-700 p-1 rounded-full bg-red-100 transition"
+                                    title="Remove this component"
+                                >
+                                    <Minus size={16} />
+                                </button>
+                             )}
+                        </div>
                         
-                        if (rowB) {
-                            matched.push({
-                                Composite_ID: rowA.Composite_ID, Match_Serial_No: rowA.Match_Serial_No, Unique_ID_A: rowA.Unique_ID_Original, Amount_A: rowA.Amount, Source_File_A: rowA.Source_File, Is_Duplicated_A: rowA.Is_Duplicated,
-                                Unique_ID_B: rowB.Unique_ID_Original, Amount_B: rowB.Amount, Source_File_B: rowB.Source_File, Is_Duplicated_B: rowB.Is_Duplicated,
-                                Remark: isExcess ? 'Matched - Excess (1:M or M:1 Line)' : 'Matched - 1:1 Line Item'
-                            });
-                            bMap.delete(rowA.Composite_ID);
-                        } else {
-                            unmatchedA.push({
-                                Unique_ID_Original: rowA.Unique_ID_Original, Amount: rowA.Amount, Source_File: rowA.Source_File, Match_Serial_No: rowA.Match_Serial_No, Composite_ID: rowA.Composite_ID, Is_Duplicated: rowA.Is_Duplicated,
-                                Remark: 'Unmatched in Record_Category_B'
-                            });
-                        }
-                    });
-
-                    bMap.forEach(rowB => {
-                        unmatchedB.push({
-                            Unique_ID_Original: rowB.Unique_ID_Original, Amount: rowB.Amount, Source_File: rowB.Source_File, Match_Serial_No: rowB.Match_Serial_No, Composite_ID: rowB.Composite_ID, Is_Duplicated: rowB.Is_Duplicated,
-                            Remark: 'Unmatched in Record_Category_A'
-                        });
-                    });
-
-                    // --- Summary Calculations (Unchanged) ---
-                    const totalA = processedA.reduce((sum, row) => sum + row.Amount, 0);
-                    const totalB = processedB.reduce((sum, row) => sum + row.Amount, 0);
-                    const matchedAmountA = matched.reduce((sum, row) => sum + row.Amount_A, 0);
-                    const matchedAmountB = matched.reduce((sum, row) => sum + row.Amount_B, 0);
-                    const unmatchedAmountA = unmatchedA.reduce((sum, row) => sum + row.Amount, 0);
-                    const unmatchedAmountB = unmatchedB.reduce((sum, row) => sum + row.Amount, 0);
-                    
-                    const gl_combined_count = matched.length + unmatchedA.length;
-                    const gl_combined_total = matchedAmountA + unmatchedAmountA;
-                    const settlement_combined_count = matched.length + unmatchedB.length;
-                    const settlement_combined_total = matchedAmountB + unmatchedAmountB;
-
-                    const summary = [
-                        { Category: '1. Matched Items (Record_Category_A)', Count: matched.length, Amount: matchedAmountA },
-                        { Category: '2. Unmatched Items (Record_Category_A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
-                        { Category: '3. Total Matched & Unmatched (A)', Count: gl_combined_count, Amount: gl_combined_total },
-                        { Category: '4. Total Consolidated Record_Category_A', Count: processedA.length, Amount: totalA },
-                        { Category: '5. Category A Difference (4 minus 3)', Count: processedA.length - gl_combined_count, Amount: totalA - gl_combined_total },
-                        { Category: '6. Matched Items (Record_Category_B)', Count: matched.length, Amount: matchedAmountB },
-                        { Category: '7. Unmatched Items (Record_Category_B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
-                        { Category: '8. Total Matched & Unmatched (B)', Count: settlement_combined_count, Amount: settlement_combined_total },
-                        { Category: '9. Total Consolidated Record_Category_B', Count: processedB.length, Amount: totalB },
-                        { Category: '10. Category B Difference (9 minus 8)', Count: processedB.length - settlement_combined_count, Amount: totalB - settlement_combined_total },
-                        { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
-                    ];
-
-                    setResults({ summary, matched, unmatchedA, unmatchedB });
-                    setStep(3);
-                } catch (err) {
-                    setError(err.message);
-                    console.error('Reconciliation error:', err);
-                } finally {
-                    setProcessing(false);
-                }
-            };
-
-            const downloadResults = async () => {
-                if (!results) return;
-
-                try {
-                    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs');
-                    const wb = XLSX.utils.book_new();
-                    
-                    const summaryWS = XLSX.utils.json_to_sheet(results.summary);
-                    XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary_Report');
-                    
-                    const matchedWS = XLSX.utils.json_to_sheet(results.matched);
-                    XLSX.utils.book_append_sheet(wb, matchedWS, 'Matched_Report');
-                    
-                    const unmatchedAWS = XLSX.utils.json_to_sheet(results.unmatchedA);
-                    XLSX.utils.book_append_sheet(wb, unmatchedAWS, 'Unmatched_Category_A');
-                    
-                    const unmatchedBWS = XLSX.utils.json_to_sheet(results.unmatchedB);
-                    XLSX.utils.book_append_sheet(wb, unmatchedBWS, 'Unmatched_Category_B');
-                    
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                    XLSX.writeFile(wb, `Reconciliation_Report_${timestamp}.xlsx`);
-                } catch (err) {
-                    setError('Error generating Excel file: ' + err.message);
-                }
-            };
-
-            const resetApp = () => {
-                setStep(1);
-                setCategoryAFiles([]);
-                setCategoryBFiles([]);
-                setColumnConfig({ uniqueIdA: '', uniqueIdB: '', amountA: '', amountB: '' });
-                setAvailableColumnsA([]);
-                setAvailableColumnsB([]);
-                setResults(null);
-                setError(null);
-            };
-
-            return (
-                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-                    <div className="max-w-6xl mx-auto">
-                        <div className="bg-white rounded-lg shadow-xl p-8">
-                            <h1 className="text-3xl font-bold text-gray-800 mb-2">Records Reconciliation Tool</h1>
-                            <p className="text-gray-600 mb-6">Optimized for large Excel files by keeping only essential columns in memory.</p>
-
-                            <div className="flex items-center justify-between mb-8">
-                                {[1, 2, 3].map((s) => (
-                                    <div key={s} className="flex items-center flex-1">
-                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
-                                            step >= s ? 'bg-indigo-600 text-white' : 'bg-gray-300 text-gray-600'
-                                        }`}>
-                                            {s}
-                                        </div>
-                                        {s < 3 && <div className={`flex-1 h-1 mx-2 ${step > s ? 'bg-indigo-600' : 'bg-gray-300'}`} />}
-                                    </div>
-                                ))}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                            {/* Source Column */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Source Column</label>
+                                <select
+                                    value={c.column}
+                                    onChange={(e) => updateComponent(c.id, 'column', e.target.value)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="">Select Column</option>
+                                    {availableColumns.map(col => (
+                                        <option key={col} value={col}>{col}</option>
+                                    ))}
+                                </select>
                             </div>
 
-                            {error && (
-                                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
-                                    <AlertCircle className="text-red-600 mr-3 flex-shrink-0 mt-0.5" size={20} />
-                                    <div>
-                                        <h3 className="font-semibold text-red-800">Error</h3>
-                                        <p className="text-red-700">{error}</p>
-                                    </div>
+                            {/* Extraction Mode (New) */}
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Extraction Mode</label>
+                                <select
+                                    value={c.extractionMode}
+                                    onChange={(e) => updateComponent(c.id, 'extractionMode', e.target.value)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="Direct">Direct (Left/Right/Middle)</option>
+                                    <option value="TextToColumn">Text-to-Column + Extract</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Text-to-Column Fields (Conditional) */}
+                        {c.extractionMode === 'TextToColumn' && (
+                             <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">1. Separator (Delimiter)</label>
+                                    <input
+                                        type="text"
+                                        value={c.separator}
+                                        onChange={(e) => updateComponent(c.id, 'separator', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="e.g., | or -"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">2. Segment Index (1-based)</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={c.splitIndex}
+                                        onChange={(e) => updateComponent(c.id, 'splitIndex', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="e.g., 2 for the second part"
+                                    />
+                                </div>
+                                <div className="md:col-span-2 text-xs text-blue-800 italic">
+                                    <p>The system first splits the Source Column by the Separator, then uses the content of the Segment Index.</p>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Positional Extraction Fields (Always shown, applied to the result of step 1) */}
+                        <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 ${c.extractionMode === 'TextToColumn' ? 'pt-2 border-t' : ''}`}>
+                            <div className="md:col-span-4">
+                                <span className="block text-xs font-bold text-gray-700 mb-1">
+                                    {c.extractionMode === 'TextToColumn' ? '3. Apply Positional Extraction to Segment' : 'Apply Positional Extraction to Column'}
+                                </span>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Extraction Position</label>
+                                <select
+                                    value={c.position}
+                                    onChange={(e) => updateComponent(c.id, 'position', e.target.value)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="All">All Characters</option>
+                                    <option value="Left">Left</option>
+                                    <option value="Right">Right</option>
+                                    <option value="Middle">Middle</option>
+                                </select>
+                            </div>
+                            
+                            {(c.position === 'Left' || c.position === 'Right' || c.position === 'Middle') && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Length</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={c.length}
+                                        onChange={(e) => updateComponent(c.id, 'length', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                        placeholder="Length"
+                                    />
                                 </div>
                             )}
 
-                            {step === 1 && (
-                                <div className="space-y-6">
-                                    <div>
-                                        <h2 className="text-xl font-semibold mb-4">Step 1: Upload Excel Files</h2>
-                                        
-                                        <div className="grid md:grid-cols-2 gap-6">
-                                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
-                                                <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category A</h3>
-                                                <label className="cursor-pointer block">
-                                                    <input
-                                                        type="file"
-                                                        multiple
-                                                        accept=".xlsx,.xls"
-                                                        onChange={(e) => handleFileUpload(e, 'A')}
-                                                        className="hidden"
-                                                    />
-                                                    <div className="flex flex-col items-center py-6 text-gray-600">
-                                                        <Upload size={48} className="mb-3 text-indigo-500" />
-                                                        <p className="font-medium">Click to upload</p>
-                                                        <p className="text-sm">Multiple Excel files accepted</p>
-                                                    </div>
-                                                </label>
-                                                {categoryAFiles.length > 0 && (
-                                                    <div className="mt-4 space-y-2 max-h-40 overflow-y-auto">
-                                                        {categoryAFiles.map((file, idx) => (
-                                                            <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                                                                <div className="flex items-center">
-                                                                    <FileSpreadsheet size={16} className="text-green-600 mr-2" />
-                                                                    <span className="text-sm truncate max-w-xs">{file.name}</span>
-                                                                </div>
-                                                                <button onClick={() => removeFile(idx, 'A')} className="text-red-500 hover:text-red-700">
-                                                                    <X size={16} />
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
-                                                <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category B</h3>
-                                                <label className="cursor-pointer block">
-                                                    <input
-                                                        type="file"
-                                                        multiple
-                                                        accept=".xlsx,.xls"
-                                                        onChange={(e) => handleFileUpload(e, 'B')}
-                                                        className="hidden"
-                                                    />
-                                                    <div className="flex flex-col items-center py-6 text-gray-600">
-                                                        <Upload size={48} className="mb-3 text-indigo-500" />
-                                                        <p className="font-medium">Click to upload</p>
-                                                        <p className="text-sm">Multiple Excel files accepted</p>
-                                                    </div>
-                                                </label>
-                                                {categoryBFiles.length > 0 && (
-                                                    <div className="mt-4 space-y-2 max-h-40 overflow-y-auto">
-                                                        {categoryBFiles.map((file, idx) => (
-                                                            <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                                                                <div className="flex items-center">
-                                                                    <FileSpreadsheet size={16} className="text-green-600 mr-2" />
-                                                                    <span className="text-sm truncate max-w-xs">{file.name}</span>
-                                                                </div>
-                                                                <button onClick={() => removeFile(idx, 'B')} className="text-red-500 hover:text-red-700">
-                                                                    <X size={16} />
-                                                                </button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex justify-end">
-                                        <button
-                                            onClick={() => setStep(2)}
-                                            disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || availableColumnsA.length === 0 || availableColumnsB.length === 0 || error}
-                                            className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
-                                        >
-                                            Next: Configure Columns
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {step === 2 && (
-                                <div className="space-y-6">
-                                    <h2 className="text-xl font-semibold mb-4">Step 2: Configure Column Names</h2>
-                                    
-                                    <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="bg-gray-50 p-6 rounded-lg">
-                                            <h3 className="font-semibold text-lg mb-4 text-indigo-700">Record Category A</h3>
-                                            
-                                            <div className="space-y-4">
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Unique ID Column
-                                                    </label>
-                                                    <select
-                                                        value={columnConfig.uniqueIdA}
-                                                        onChange={(e) => setColumnConfig({...columnConfig, uniqueIdA: e.target.value})}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                    >
-                                                        <option value="">Select column...</option>
-                                                        {availableColumnsA.map(col => (
-                                                            <option key={col} value={col}>{col}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Amount Column
-                                                    </label>
-                                                    <select
-                                                        value={columnConfig.amountA}
-                                                        onChange={(e) => setColumnConfig({...columnConfig, amountA: e.target.value})}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                    >
-                                                        <option value="">Select column...</option>
-                                                        {availableColumnsA.map(col => (
-                                                            <option key={col} value={col}>{col}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-gray-50 p-6 rounded-lg">
-                                            <h3 className="font-semibold text-lg mb-4 text-indigo-700">Record Category B</h3>
-                                            
-                                            <div className="space-y-4">
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Unique ID Column
-                                                    </label>
-                                                    <select
-                                                        value={columnConfig.uniqueIdB}
-                                                        onChange={(e) => setColumnConfig({...columnConfig, uniqueIdB: e.target.value})}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                    >
-                                                        <option value="">Select column...</option>
-                                                        {availableColumnsB.map(col => (
-                                                            <option key={col} value={col}>{col}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                        Amount Column
-                                                    </label>
-                                                    <select
-                                                        value={columnConfig.amountB}
-                                                        onChange={(e) => setColumnConfig({...columnConfig, amountB: e.target.value})}
-                                                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                    >
-                                                        <option value="">Select column...</option>
-                                                        {availableColumnsB.map(col => (
-                                                            <option key={col} value={col}>{col}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex justify-between">
-                                        <button
-                                            onClick={() => setStep(1)}
-                                            className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
-                                        >
-                                            Back
-                                        </button>
-                                        <button
-                                            onClick={performReconciliation}
-                                            disabled={processing || !columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB}
-                                            className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
-                                        >
-                                            {processing ? 'Processing...' : 'Process Reconciliation'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {step === 3 && results && (
-                                <div className="space-y-6">
-                                    <div className="flex items-center justify-between">
-                                        <h2 className="text-xl font-semibold">Reconciliation Results</h2>
-                                        <div className="flex gap-3">
-                                            <button
-                                                onClick={downloadResults}
-                                                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
-                                            >
-                                                <Download size={20} />
-                                                Download Excel Report
-                                            </button>
-                                            <button
-                                                onClick={resetApp}
-                                                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
-                                            >
-                                                Start New Reconciliation
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid md:grid-cols-3 gap-4">
-                                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <p className="text-sm text-green-600 font-medium">Matched Records</p>
-                                                    <p className="text-2xl font-bold text-green-700">{results.matched.length.toLocaleString()}</p>
-                                                </div>
-                                                <CheckCircle className="text-green-500" size={32} />
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <p className="text-sm text-orange-600 font-medium">Unmatched Category A</p>
-                                                    <p className="text-2xl font-bold text-orange-700">{results.unmatchedA.length.toLocaleString()}</p>
-                                                </div>
-                                                <AlertCircle className="text-orange-500" size={32} />
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <p className="text-sm text-red-600 font-medium">Unmatched Category B</p>
-                                                    <p className="text-2xl font-bold text-red-700">{results.unmatchedB.length.toLocaleString()}</p>
-                                                </div>
-                                                <AlertCircle className="text-red-500" size={32} />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-gray-50 rounded-lg p-6">
-                                        <h3 className="font-semibold text-lg mb-4">Summary Report</h3>
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-sm">
-                                                <thead>
-                                                    <tr className="border-b-2 border-gray-300">
-                                                        <th className="text-left py-2 px-3">Category</th>
-                                                        <th className="text-right py-2 px-3">Count</th>
-                                                        <th className="text-right py-2 px-3">Amount</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {results.summary.map((row, idx) => (
-                                                        <tr key={idx} className={`border-b border-gray-200 ${idx >= 4 && idx < 10 ? 'bg-blue-50' : ''}`}>
-                                                            <td className="py-2 px-3">{row.Category}</td>
-                                                            <td className="text-right py-2 px-3">{row.Count.toLocaleString()}</td>
-                                                            <td className="text-right py-2 px-3">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                        <p className="text-sm text-blue-800">
-                                            <strong>Optimization Note:</strong> This application successfully reduces the memory footprint by processing only the **Unique ID**, **Amount**, and **Source File** from the Excel data.
-                                        </p>
-                                    </div>
+                            {c.position === 'Middle' && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Start (1-based)</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={c.start}
+                                        onChange={(e) => updateComponent(c.id, 'start', e.target.value)}
+                                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                        placeholder="Start Index (1)"
+                                    />
                                 </div>
                             )}
                         </div>
                     </div>
+                ))}
+
+                <button 
+                    onClick={addComponent}
+                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition"
+                >
+                    <Plus size={16} /> Add Component
+                </button>
+            </div>
+        );
+    };
+
+    const ReconciliationApp = () => {
+      const defaultIdConfig = { 
+            id: 1, 
+            column: '', 
+            extractionMode: 'Direct', 
+            separator: '|', 
+            splitIndex: 1, 
+            position: 'Left', 
+            length: 5, 
+            start: 1 
+      };
+
+      const reportDefinitions = [
+        { key: 'file1', name: '1. Consolidated Input (Category A)' },
+        { key: 'file2', name: '2. Consolidated Input (Category B)' },
+        { key: 'file3', name: '3. Analysis Report (Category A Matched/Unmatched)' },
+        { key: 'file4', name: '4. Analysis Report (Category B Matched/Unmatched)' },
+        { key: 'file5', name: '5. Structured Summary Report (A & B)' },
+      ];
+
+      const [step, setStep] = useState(1);
+      const [categoryAFiles, setCategoryAFiles] = useState([]);
+      const [categoryBFiles, setCategoryBFiles] = useState([]);
+      
+      const [columnConfig, setColumnConfig] = useState({
+        amountA: '',
+        amountB: ''
+      });
+      const [uniqueIdConfigA, setUniqueIdConfigA] = useState([defaultIdConfig]);
+      const [uniqueIdConfigB, setUniqueIdConfigB] = useState([defaultIdConfig]);
+
+      const [originalColumnsA, setOriginalColumnsA] = useState([]);
+      const [originalColumnsB, setOriginalColumnsB] = useState([]);
+      const [availableColumnsA, setAvailableColumnsA] = useState([]);
+      const [availableColumnsB, setAvailableColumnsB] = useState([]);
+      
+      const [processing, setProcessing] = useState(false);
+      const [results, setResults] = useState(null);
+      const [error, setError] = useState(null);
+      const [selectedDownloads, setSelectedDownloads] = useState(reportDefinitions.map(r => r.key)); // Default to all selected
+
+
+      const handleDownloadSelection = (key) => {
+        setSelectedDownloads(prev => 
+            prev.includes(key)
+                ? prev.filter(k => k !== key)
+                : [...prev, key]
+        );
+      };
+
+
+      const handleFileUpload = async (e, category) => {
+        const files = Array.from(e.target.files);
+        if (category === 'A') {
+          setCategoryAFiles(prev => [...prev, ...files]);
+          if (files.length > 0 && availableColumnsA.length === 0) {
+            await extractColumns(files[0], setAvailableColumnsA, setOriginalColumnsA);
+          }
+        } else {
+          setCategoryBFiles(prev => [...prev, ...files]);
+          if (files.length > 0 && availableColumnsB.length === 0) {
+            await extractColumns(files[0], setAvailableColumnsB, setOriginalColumnsB);
+          }
+        }
+      };
+
+      const extractColumns = async (file, setAvailableColumns, setOriginalColumns) => {
+        try {
+          const data = await file.arrayBuffer();
+          const workbook = XLSX.read(data, { type: 'array' });
+          
+          const firstSheetName = workbook.SheetNames[0];
+          const firstSheet = workbook.Sheets[firstSheetName];
+          
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          if (jsonData.length > 0) {
+            const columns = jsonData[0].filter(col => col);
+            setAvailableColumns(columns);
+            setOriginalColumns(columns); // Store the full list of original columns
+          }
+        } catch (err) {
+          console.error('Error reading file for columns:', err);
+          setError(`Error reading columns from file '${file.name}'. Ensure the first sheet is properly formatted and contains headers.`);
+        }
+      };
+      
+      const removeFile = (index, category) => {
+        if (category === 'A') {
+          setCategoryAFiles(prev => prev.filter((_, i) => i !== index));
+        } else {
+          setCategoryBFiles(prev => prev.filter((_, i) => i !== index));
+        }
+      };
+
+      const readExcelFiles = async (files) => {
+        const allData = [];
+        for (const file of files) {
+          try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const firstSheet = workbook.Sheets[firstSheetName];
+            
+            const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+            jsonData.forEach(row => row.Source_File = file.name);
+            allData.push(...jsonData);
+          } catch (err) {
+            console.error(`Error reading ${file.name} data:`, err);
+            setError(`Critical: Failed to read data from '${file.name}'. Please check the file's integrity.`);
+            return []; 
+          }
+        }
+        return allData;
+      };
+
+      const isValidConfig = useMemo(() => {
+          const isConfigAValid = uniqueIdConfigA.some(c => c.column && c.column !== '');
+          const isConfigBValid = uniqueIdConfigB.some(c => c.column && c.column !== '');
+
+          return isConfigAValid && isConfigBValid && columnConfig.amountA && columnConfig.amountB;
+      }, [uniqueIdConfigA, uniqueIdConfigB, columnConfig.amountA, columnConfig.amountB]);
+
+
+      const performReconciliation = async () => {
+        setProcessing(true);
+        setError(null);
+
+        try {
+          if (categoryAFiles.length === 0 || categoryBFiles.length === 0) {
+            throw new Error('Please upload files for both categories');
+          }
+          if (!isValidConfig) {
+            throw new Error('Please specify at least one column for the Unique ID for both categories, and select the Amount columns.');
+          }
+
+          const dataA = await readExcelFiles(categoryAFiles);
+          const dataB = await readExcelFiles(categoryBFiles);
+
+          if (dataA.length === 0 || dataB.length === 0) {
+            throw new Error('No data found in uploaded files');
+          }
+
+          // --- 1. Standardization and Initial Processing ---
+          const standardizeData = (data, idConfig, amountCol, categoryLabel) => {
+            return data.map(row => {
+                const uniqueIdBase = generateCompositeIdBase(row, idConfig);
+                const amountValue = parseFloat(row[amountCol]) || 0;
+
+                return {
+                    ...row, 
+                    Category: categoryLabel,
+                    Unique_ID_Original: uniqueIdBase.trim().toUpperCase(), 
+                    Source_File: row.Source_File,
+                    Internal_Amount: amountValue 
+                };
+            });
+          };
+
+          const standardizedA = standardizeData(dataA, uniqueIdConfigA, columnConfig.amountA, 'Category_A');
+          const standardizedB = standardizeData(dataB, uniqueIdConfigB, columnConfig.amountB, 'Category_B');
+
+          // --- 2. Calculate Duplication Count & Duplication Flag ---
+          const checkDuplicates = (data) => {
+            const idCounts = {};
+            data.forEach(row => {
+              const id = row.Unique_ID_Original;
+              idCounts[id] = (idCounts[id] || 0) + 1;
+            });
+            
+            return data.map(row => ({
+              ...row,
+              Appearance_Count: idCounts[row.Unique_ID_Original],
+              Is_Duplicated_Set: idCounts[row.Unique_ID_Original] > 1
+            }));
+          };
+
+          let processedA = checkDuplicates(standardizedA);
+          let processedB = checkDuplicates(standardizedB);
+          
+          // --- 3. Serialization (1 for many, many for one) ---
+          // This creates the Match_Serial_No and Composite_ID used for accurate matching
+          const addCompositeIds = (data) => {
+            const serialMap = {};
+            return data.map(row => {
+              const id = row.Unique_ID_Original;
+              serialMap[id] = (serialMap[id] || 0) + 1;
+              return {
+                ...row,
+                Match_Serial_No: serialMap[id],
+                Composite_ID: `${id}_${serialMap[id]}` 
+              };
+            });
+          };
+
+          processedA = addCompositeIds(processedA);
+          processedB = addCompositeIds(processedB);
+
+          // --- 4. Reconciliation (Outer Join Logic) ---
+          const bMap = new Map(processedB.map(row => [row.Composite_ID, row]));
+
+          const matchedA = [];
+          const matchedB = [];
+          const unmatchedA = [];
+          const unmatchedB = [];
+
+          processedA.forEach(rowA => {
+            const rowB = bMap.get(rowA.Composite_ID);
+            
+            if (rowB) {
+                matchedA.push({...rowA}); 
+                matchedB.push({...rowB});
+                bMap.delete(rowA.Composite_ID); 
+            } else {
+                unmatchedA.push({...rowA});
+            }
+          });
+
+          bMap.forEach(rowB => {
+            unmatchedB.push({...rowB});
+          });
+
+          // --- 5. Structured Summary Report Generation ---
+          const createDetailedSummaryMetrics = (processedData, matchedData, unmatchedData) => {
+              // 1. Split by Appearance Count
+              const onceRecords = processedData.filter(r => r.Appearance_Count === 1);
+              const multiRecords = processedData.filter(r => r.Appearance_Count > 1);
+
+              return {
+                  // Group 1: Based on Duplication (Input Totals)
+                  onceCount: onceRecords.length, 
+                  onceAmount: onceRecords.reduce((sum, row) => sum + row.Internal_Amount, 0),
+                  
+                  multiCount: multiRecords.length,
+                  multiAmount: multiRecords.reduce((sum, row) => sum + row.Internal_Amount, 0),
+                  
+                  // Group 2: Based on Reconciliation (Output Totals)
+                  matchedCount: matchedData.length,
+                  matchedAmount: matchedData.reduce((sum, row) => sum + row.Internal_Amount, 0),
+                  
+                  unmatchedCount: unmatchedData.length,
+                  unmatchedAmount: unmatchedData.reduce((sum, row) => sum + row.Internal_Amount, 0)
+              };
+          };
+
+          const summaryMetricsA = createDetailedSummaryMetrics(processedA, matchedA, unmatchedA);
+          const summaryMetricsB = createDetailedSummaryMetrics(processedB, matchedB, unmatchedB);
+
+
+          setResults({ 
+              summaryMetricsA,
+              summaryMetricsB, 
+              matchedA, 
+              matchedB,
+              unmatchedA, 
+              unmatchedB,
+              processedA_data: processedA, 
+              processedB_data: processedB, 
+          });
+          setStep(3);
+        } catch (err) {
+          setError(err.message);
+          console.error('Reconciliation error:', err);
+        } finally {
+          setProcessing(false);
+        }
+      };
+      
+      /**
+       * Creates the structured summary array for both Excel output and Web display.
+       */
+      const getStructuredSummaryData = (metrics, categoryLabel) => {
+          const sum1Count = metrics.onceCount + metrics.multiCount;
+          const sum1Amount = metrics.onceAmount + metrics.multiAmount;
+
+          const sum2Count = metrics.matchedCount + metrics.unmatchedCount;
+          const sum2Amount = metrics.matchedAmount + metrics.unmatchedAmount;
+
+          const controlCheckCount = sum2Count - sum1Count;
+          const controlCheckAmount = sum2Amount - sum1Amount;
+
+          return [
+              // Headers
+              { Category: `${categoryLabel} Summary Metric`, Count: 'Count', Amount: 'Amount', isHeader: true },
+              
+              // Group 1: Based on Duplication (Input Totals)
+              { Category: 'Total Count/Amount (Unique IDs appearing once)', Count: metrics.onceCount, Amount: metrics.onceAmount },
+              { Category: 'Total Count/Amount (Unique IDs appearing > once)', Count: metrics.multiCount, Amount: metrics.multiAmount },
+              { Category: 'Grand Total (Input Records)', Count: sum1Count, Amount: sum1Amount, isTotal: true, isInputTotal: true },
+              
+              { Category: '', Count: '', Amount: '' }, // Blank row
+              
+              // Group 2: Based on Reconciliation (Output Totals)
+              { Category: 'Total matched items Count and amount', Count: metrics.matchedCount, Amount: metrics.matchedAmount },
+              { Category: 'Total Unmatched Items Count and Amount', Count: metrics.unmatchedCount, Amount: metrics.unmatchedAmount },
+              { Category: 'Grand Total (Reconciliation Result)', Count: sum2Count, Amount: sum2Amount, isTotal: true },
+              
+              { Category: '', Count: '', Amount: '' }, // Blank row
+              
+              // Control Check
+              { 
+                  Category: 'Control Check (Diff: Grand Total 2 - Grand Total 1)', 
+                  Count: controlCheckCount, 
+                  Amount: controlCheckAmount,
+                  isControl: true
+              },
+          ];
+      };
+      
+      /**
+       * Component to render a single structured summary table.
+       */
+      const SummaryTable = ({ metrics, category }) => {
+        const data = getStructuredSummaryData(metrics, category);
+
+        return (
+            <div className="bg-white p-4 rounded-lg shadow">
+                <h4 className="font-semibold text-base mb-3 text-indigo-700">{category} Summary</h4>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs sm:text-sm">
+                        <thead>
+                            <tr className="border-b-2 border-gray-300 bg-gray-50">
+                                <th className="text-left py-2 px-3 w-3/5">Metric</th>
+                                <th className="text-right py-2 px-3 w-1/5">Count</th>
+                                <th className="text-right py-2 px-3 w-1/5">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                          {data.filter(row => !row.isHeader).map((row, idx) => (
+                            <tr 
+                                key={idx} 
+                                className={`
+                                  ${row.isInputTotal || row.isTotal ? 'bg-indigo-100 font-bold border-indigo-400 border-t-2' : 'border-b border-gray-200'}
+                                  ${row.isControl ? 'bg-red-100 font-bold border-red-400 border-t-2' : ''}
+                                  ${row.Category === '' ? 'h-3 bg-gray-100 border-none' : ''}
+                                `}
+                            >
+                              <td className="py-1.5 px-3 whitespace-nowrap">{row.Category}</td>
+                              <td className="text-right py-1.5 px-3">
+                                {typeof row.Count === 'number' ? row.Count.toLocaleString() : row.Count}
+                              </td>
+                              <td className="text-right py-1.5 px-3">
+                                {typeof row.Amount === 'number' ? row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : row.Amount}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                    </table>
                 </div>
-            );
-        };
+            </div>
+        );
+      };
 
-        const container = document.getElementById('root');
-        const root = ReactDOM.createRoot(container);
-        root.render(<ReconciliationApp />);
+
+      const downloadResults = async () => {
+        if (!results) return;
+        if (selectedDownloads.length === 0) {
+            alert('Please select at least one file to download.');
+            return;
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        let downloadedCount = 0;
+
+        // --- Core Data Preparation (Applying strict column filter) ---
+        const matchedA_data = filterOutputColumns(results.matchedA, originalColumnsA);
+        const unmatchedA_data = filterOutputColumns(results.unmatchedA, originalColumnsA);
+        const matchedB_data = filterOutputColumns(results.matchedB, originalColumnsB);
+        const unmatchedB_data = filterOutputColumns(results.unmatchedB, originalColumnsB);
+
+        // --- 1. Consolidated Category A Input File (key: file1) ---
+        if (selectedDownloads.includes('file1')) {
+            const dataA_consolidated = filterOutputColumns(results.processedA_data, originalColumnsA);
+            const wb1 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb1, XLSX.utils.json_to_sheet(dataA_consolidated), 'Consolidated_A_Input');
+            XLSX.writeFile(wb1, `1_Consolidated_Input_Category_A_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
+
+        // --- 2. Consolidated Category B Input File (key: file2) ---
+        if (selectedDownloads.includes('file2')) {
+            const dataB_consolidated = filterOutputColumns(results.processedB_data, originalColumnsB);
+            const wb2 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(dataB_consolidated), 'Consolidated_B_Input');
+            XLSX.writeFile(wb2, `2_Consolidated_Input_Category_B_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
+
+        // --- 3. Category A Analysis File (key: file3) ---
+        if (selectedDownloads.includes('file3')) {
+            const wb3 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(matchedA_data), 'Matched_Items_A');
+            XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(unmatchedA_data), 'Unmatched_Items_A');
+            XLSX.writeFile(wb3, `3_Category_A_Analysis_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
+
+        // --- 4. Category B Analysis File (key: file4) ---
+        if (selectedDownloads.includes('file4')) {
+            const wb4 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(matchedB_data), 'Matched_Items_B');
+            XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(unmatchedB_data), 'Unmatched_Items_B');
+            XLSX.writeFile(wb4, `4_Category_B_Analysis_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
+        
+        // --- 5. Summary Report File (key: file5) ---
+        if (selectedDownloads.includes('file5')) {
+            const summaryA_data = getStructuredSummaryData(results.summaryMetricsA, 'Category A');
+            const summaryB_data = getStructuredSummaryData(results.summaryMetricsB, 'Category B');
+            const cleanupSummary = (data) => data.map(({ isHeader, isTotal, isInputTotal, isControl, ...rest }) => rest);
+
+            const wb5 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryA_data)), 'Category A Summary');
+            XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryB_data)), 'Category B Summary');
+            XLSX.writeFile(wb5, `5_Summary_Report_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
+
+        // Notify user
+        alert(`Reconciliation complete! ${downloadedCount} Excel file(s) have been downloaded.`);
+      };
+      
+      const resetApp = () => {
+        setStep(1);
+        setCategoryAFiles([]);
+        setCategoryBFiles([]);
+        setColumnConfig({ amountA: '', amountB: '' });
+        setUniqueIdConfigA([defaultIdConfig]);
+        setUniqueIdConfigB([defaultIdConfig]);
+        setAvailableColumnsA([]);
+        setAvailableColumnsB([]);
+        setOriginalColumnsA([]);
+        setOriginalColumnsB([]);
+        setResults(null);
+        setError(null);
+        setSelectedDownloads(reportDefinitions.map(r => r.key));
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+          <div className="max-w-7xl mx-auto">
+            <div className="bg-white rounded-lg shadow-xl p-8">
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">Advanced Records Reconciliation Tool</h1>
+              <p className="text-gray-600 mb-6">Create a composite Unique ID using multi-step (Text-to-Column + Extraction) logic for accurate matching.</p>
+
+              <div className="flex items-center justify-between mb-8">
+                {[1, 2, 3].map((s) => (
+                  <div key={s} className="flex items-center flex-1">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                      step >= s ? 'bg-indigo-600 text-white' : 'bg-gray-300 text-gray-600'
+                    }`}>
+                      {s}
+                    </div>
+                    {s < 3 && <div className={`flex-1 h-1 mx-2 ${step > s ? 'bg-indigo-600' : 'bg-gray-300'}`} />}
+                  </div>
+                ))}
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
+                  <AlertCircle className="text-red-600 mr-3 flex-shrink-0 mt-0.5" size={20} />
+                  <div>
+                    <h3 className="font-semibold text-red-800">Error</h3>
+                    <p className="text-red-700">{error}</p>
+                  </div>
+                </div>
+              )}
+
+              {step === 1 && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-semibold mb-4">Step 1: Upload Excel Files</h2>
+                    
+                    <div className="grid md:grid-cols-2 gap-6">
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
+                        <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category A</h3>
+                        <label className="cursor-pointer block">
+                          <input
+                            type="file"
+                            multiple
+                            accept=".xlsx,.xls"
+                            onChange={(e) => handleFileUpload(e, 'A')}
+                            className="hidden"
+                          />
+                          <div className="flex flex-col items-center py-6 text-gray-600">
+                            <Upload size={48} className="mb-3 text-indigo-500" />
+                            <p className="font-medium">Click to upload</p>
+                            <p className="text-sm">Multiple Excel files accepted</p>
+                          </div>
+                        </label>
+                        {categoryAFiles.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {categoryAFiles.map((file, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                <div className="flex items-center">
+                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
+                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
+                                </div>
+                                <button onClick={() => removeFile(idx, 'A')} className="text-red-500 hover:text-red-700">
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition">
+                        <h3 className="font-semibold text-lg mb-3 text-indigo-700">Record Category B</h3>
+                        <label className="cursor-pointer block">
+                          <input
+                            type="file"
+                            multiple
+                            accept=".xlsx,.xls"
+                            onChange={(e) => handleFileUpload(e, 'B')}
+                            className="hidden"
+                          />
+                          <div className="flex flex-col items-center py-6 text-gray-600">
+                            <Upload size={48} className="mb-3 text-indigo-500" />
+                            <p className="font-medium">Click to upload</p>
+                            <p className="text-sm">Multiple Excel files accepted</p>
+                          </div>
+                        </label>
+                        {categoryBFiles.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {categoryBFiles.map((file, idx) => (
+                              <div key={idx} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                <div className="flex items-center">
+                                  <FileSpreadsheet size={16} className="text-green-600 mr-2" />
+                                  <span className="text-sm truncate max-w-xs">{file.name}</span>
+                                </div>
+                                <button onClick={() => removeFile(idx, 'B')} className="text-red-500 hover:text-red-700">
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => setStep(2)}
+                      disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+                    >
+                      Next: Configure Columns
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === 2 && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-semibold mb-4">Step 2: Configure Unique ID & Amount Columns</h2>
+                  
+                  <div className="grid md:grid-cols-2 gap-8">
+                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
+                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category A Configuration</h3>
+                      
+                      <IdComponentForm 
+                          config={uniqueIdConfigA}
+                          setConfig={setUniqueIdConfigA}
+                          availableColumns={availableColumnsA}
+                          category="A"
+                      />
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Amount Column (e.g., <span className="font-mono">{columnConfig.amountA || 'Select...'}</span>)
+                        </label>
+                        <select
+                          value={columnConfig.amountA}
+                          onChange={(e) => setColumnConfig({...columnConfig, amountA: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                          <option value="">Select amount column...</option>
+                          {availableColumnsA.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 p-6 rounded-lg space-y-6">
+                      <h3 className="font-bold text-xl text-indigo-800 border-b pb-2">Record Category B Configuration</h3>
+                      
+                      <IdComponentForm 
+                          config={uniqueIdConfigB}
+                          setConfig={setUniqueIdConfigB}
+                          availableColumns={availableColumnsB}
+                          category="B"
+                      />
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Amount Column (e.g., <span className="font-mono">{columnConfig.amountB || 'Select...'}</span>)
+                        </label>
+                        <select
+                          value={columnConfig.amountB}
+                          onChange={(e) => setColumnConfig({...columnConfig, amountB: e.target.value})}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        >
+                          <option value="">Select amount column...</option>
+                          {availableColumnsB.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4" role="alert">
+                    <p className="font-bold">Matching Key Structure</p>
+                    <ul className="list-disc list-inside text-sm mt-1 space-y-0.5">
+                      <li>The **`Appearance_Count`** shows how many times the base ID (`Unique_ID_Original`) was found in its source file.</li>
+                      <li>The **`Composite_ID`** (included in all output reports) is the actual serialized key used for matching (Base ID + occurrence number).</li>
+                    </ul>
+                  </div>
+
+
+                  <div className="flex justify-between">
+                    <button
+                      onClick={() => setStep(1)}
+                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={performReconciliation}
+                      disabled={processing || !isValidConfig}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition"
+                    >
+                      {processing ? 'Processing...' : 'Process Reconciliation'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === 3 && results && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-semibold">Reconciliation Results</h2>
+                    <button
+                        onClick={resetApp}
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
+                      >
+                        Start New Reconciliation
+                      </button>
+                  </div>
+
+                  {/* High-level Metrics */}
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-green-600 font-medium">Total Matched Records (A/B Sides)</p>
+                          <p className="text-2xl font-bold text-green-700">{results.matchedA.length}</p>
+                        </div>
+                        <CheckCircle size={32} />
+                      </div>
+                    </div>
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-orange-600 font-medium">Unmatched Category A</p>
+                          <p className="text-2xl font-bold text-orange-700">{results.unmatchedA.length}</p>
+                        </div>
+                        <AlertCircle size={32} />
+                      </div>
+                    </div>
+
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-red-600 font-medium">Unmatched Category B</p>
+                          <p className="text-2xl font-bold text-red-700">{results.unmatchedB.length}</p>
+                        </div>
+                        <AlertCircle size={32} />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Download Options (New Flexible Download Section) */}
+                  <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                    <h3 className="font-bold text-xl mb-3 flex items-center gap-2 text-indigo-700">
+                        <Download size={24} />
+                        Step 3.1: Select Reports to Download
+                    </h3>
+                    <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+                        {reportDefinitions.map(report => (
+                            <div key={report.key} className="flex items-center bg-gray-50 p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
+                                <input
+                                    id={report.key}
+                                    type="checkbox"
+                                    checked={selectedDownloads.includes(report.key)}
+                                    onChange={() => handleDownloadSelection(report.key)}
+                                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                />
+                                <label htmlFor={report.key} className="ml-3 text-xs font-medium text-gray-700 flex-1 cursor-pointer">
+                                    {report.name}
+                                </label>
+                            </div>
+                        ))}
+                    </div>
+                    <button
+                        onClick={downloadResults}
+                        disabled={selectedDownloads.length === 0}
+                        className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-300 transition"
+                    >
+                        <Download size={20} />
+                        Download Selected ({selectedDownloads.length}) Report{selectedDownloads.length !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+
+
+                  {/* Structured Summary Tables */}
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Structured Summary</h3>
+                    <div className="grid md:grid-cols-2 gap-6">
+                        {/* Category A Summary */}
+                        <SummaryTable metrics={results.summaryMetricsA} category="Category A" />
+                        
+                        {/* Category B Summary */}
+                        <SummaryTable metrics={results.summaryMetricsB} category="Category B" />
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm text-blue-800">
+                      You can now selectively download the reports using the options above. All output files include the **`Composite_ID`**, **`Source_File`**, and **`Appearance_Count`** columns for traceability.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+    
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<ReconciliationApp />);
+
     </script>
-
 </body>
 </html>
