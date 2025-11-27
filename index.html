@@ -52,7 +52,7 @@
             str = parts[index] !== undefined ? String(parts[index]).trim() : '';
         }
 
-        // 2. Existing Positional Extraction (Left/Right/Middle)
+        // 2. Existing Positional Extraction (Left/Right/Middle/All)
         if (str.length === 0) return '';
         
         const len = parseInt(config.length) || str.length;
@@ -65,8 +65,9 @@
             case 'Middle':
                 const startIndex = (parseInt(config.start) || 1) - 1; // Convert 1-based index to 0-based
                 return str.substring(startIndex, startIndex + len);
+            case 'All':
             default:
-                return str; // Should not happen with current config
+                return str; 
         }
     };
     
@@ -291,6 +292,14 @@
             start: 1 
       };
 
+      const reportDefinitions = [
+        { key: 'file1', name: '1. Consolidated Input (Category A)' },
+        { key: 'file2', name: '2. Consolidated Input (Category B)' },
+        { key: 'file3', name: '3. Analysis Report (Category A Matched/Unmatched)' },
+        { key: 'file4', name: '4. Analysis Report (Category B Matched/Unmatched)' },
+        { key: 'file5', name: '5. Structured Summary Report (A & B)' },
+      ];
+
       const [step, setStep] = useState(1);
       const [categoryAFiles, setCategoryAFiles] = useState([]);
       const [categoryBFiles, setCategoryBFiles] = useState([]);
@@ -310,6 +319,17 @@
       const [processing, setProcessing] = useState(false);
       const [results, setResults] = useState(null);
       const [error, setError] = useState(null);
+      const [selectedDownloads, setSelectedDownloads] = useState(reportDefinitions.map(r => r.key)); // Default to all selected
+
+
+      const handleDownloadSelection = (key) => {
+        setSelectedDownloads(prev => 
+            prev.includes(key)
+                ? prev.filter(k => k !== key)
+                : [...prev, key]
+        );
+      };
+
 
       const handleFileUpload = async (e, category) => {
         const files = Array.from(e.target.files);
@@ -615,53 +635,71 @@
 
       const downloadResults = async () => {
         if (!results) return;
+        if (selectedDownloads.length === 0) {
+            alert('Please select at least one file to download.');
+            return;
+        }
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        let downloadedCount = 0;
 
         // --- Core Data Preparation (Applying strict column filter) ---
-        // filterOutputColumns now correctly includes 'Composite_ID'
         const matchedA_data = filterOutputColumns(results.matchedA, originalColumnsA);
         const unmatchedA_data = filterOutputColumns(results.unmatchedA, originalColumnsA);
         const matchedB_data = filterOutputColumns(results.matchedB, originalColumnsB);
         const unmatchedB_data = filterOutputColumns(results.unmatchedB, originalColumnsB);
 
-        // --- 1. Consolidated Category A Input File ---
-        const dataA_consolidated = filterOutputColumns(results.processedA_data, originalColumnsA);
-        const wb1 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb1, XLSX.utils.json_to_sheet(dataA_consolidated), 'Consolidated_A_Input');
-        XLSX.writeFile(wb1, `1_Consolidated_Input_Category_A_${timestamp}.xlsx`);
+        // --- 1. Consolidated Category A Input File (key: file1) ---
+        if (selectedDownloads.includes('file1')) {
+            const dataA_consolidated = filterOutputColumns(results.processedA_data, originalColumnsA);
+            const wb1 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb1, XLSX.utils.json_to_sheet(dataA_consolidated), 'Consolidated_A_Input');
+            XLSX.writeFile(wb1, `1_Consolidated_Input_Category_A_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
 
-        // --- 2. Consolidated Category B Input File ---
-        const dataB_consolidated = filterOutputColumns(results.processedB_data, originalColumnsB);
-        const wb2 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(dataB_consolidated), 'Consolidated_B_Input');
-        XLSX.writeFile(wb2, `2_Consolidated_Input_Category_B_${timestamp}.xlsx`);
+        // --- 2. Consolidated Category B Input File (key: file2) ---
+        if (selectedDownloads.includes('file2')) {
+            const dataB_consolidated = filterOutputColumns(results.processedB_data, originalColumnsB);
+            const wb2 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(dataB_consolidated), 'Consolidated_B_Input');
+            XLSX.writeFile(wb2, `2_Consolidated_Input_Category_B_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
 
-        // --- 3. Category A Analysis File (Matched A + Unmatched A) ---
-        const wb3 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(matchedA_data), 'Matched_Items');
-        XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(unmatchedA_data), 'Unmatched_Items');
-        XLSX.writeFile(wb3, `3_Category_A_Analysis_${timestamp}.xlsx`);
+        // --- 3. Category A Analysis File (key: file3) ---
+        if (selectedDownloads.includes('file3')) {
+            const wb3 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(matchedA_data), 'Matched_Items_A');
+            XLSX.utils.book_append_sheet(wb3, XLSX.utils.json_to_sheet(unmatchedA_data), 'Unmatched_Items_A');
+            XLSX.writeFile(wb3, `3_Category_A_Analysis_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
 
-        // --- 4. Category B Analysis File (Matched B + Unmatched B) ---
-        const wb4 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(matchedB_data), 'Matched_Items');
-        XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(unmatchedB_data), 'Unmatched_Items');
-        XLSX.writeFile(wb4, `4_Category_B_Analysis_${timestamp}.xlsx`);
+        // --- 4. Category B Analysis File (key: file4) ---
+        if (selectedDownloads.includes('file4')) {
+            const wb4 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(matchedB_data), 'Matched_Items_B');
+            XLSX.utils.book_append_sheet(wb4, XLSX.utils.json_to_sheet(unmatchedB_data), 'Unmatched_Items_B');
+            XLSX.writeFile(wb4, `4_Category_B_Analysis_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
         
-        // --- 5. Summary Report File (Structured Output) ---
-        const summaryA_data = getStructuredSummaryData(results.summaryMetricsA, 'Category A');
-        const summaryB_data = getStructuredSummaryData(results.summaryMetricsB, 'Category B');
+        // --- 5. Summary Report File (key: file5) ---
+        if (selectedDownloads.includes('file5')) {
+            const summaryA_data = getStructuredSummaryData(results.summaryMetricsA, 'Category A');
+            const summaryB_data = getStructuredSummaryData(results.summaryMetricsB, 'Category B');
+            const cleanupSummary = (data) => data.map(({ isHeader, isTotal, isInputTotal, isControl, ...rest }) => rest);
 
-        // Remove the helper fields used for styling in the web display
-        const cleanupSummary = (data) => data.map(({ isHeader, isTotal, isInputTotal, isControl, ...rest }) => rest);
-
-        const wb5 = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryA_data)), 'Category A Summary');
-        XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryB_data)), 'Category B Summary');
-        XLSX.writeFile(wb5, `5_Summary_Report_${timestamp}.xlsx`);
+            const wb5 = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryA_data)), 'Category A Summary');
+            XLSX.utils.book_append_sheet(wb5, XLSX.utils.json_to_sheet(cleanupSummary(summaryB_data)), 'Category B Summary');
+            XLSX.writeFile(wb5, `5_Summary_Report_${timestamp}.xlsx`);
+            downloadedCount++;
+        }
 
         // Notify user
-        alert('Reconciliation complete! Five separate Excel files have been downloaded.');
+        alert(`Reconciliation complete! ${downloadedCount} Excel file(s) have been downloaded.`);
       };
       
       const resetApp = () => {
@@ -677,6 +715,7 @@
         setOriginalColumnsB([]);
         setResults(null);
         setError(null);
+        setSelectedDownloads(reportDefinitions.map(r => r.key));
       };
 
       return (
@@ -885,21 +924,12 @@
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xl font-semibold">Reconciliation Results</h2>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={downloadResults}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
-                      >
-                        <Download size={20} />
-                        Download 5 Excel Reports
-                      </button>
-                      <button
+                    <button
                         onClick={resetApp}
                         className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition"
                       >
                         Start New Reconciliation
                       </button>
-                    </div>
                   </div>
 
                   {/* High-level Metrics */}
@@ -933,6 +963,39 @@
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Download Options (New Flexible Download Section) */}
+                  <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+                    <h3 className="font-bold text-xl mb-3 flex items-center gap-2 text-indigo-700">
+                        <Download size={24} />
+                        Step 3.1: Select Reports to Download
+                    </h3>
+                    <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+                        {reportDefinitions.map(report => (
+                            <div key={report.key} className="flex items-center bg-gray-50 p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
+                                <input
+                                    id={report.key}
+                                    type="checkbox"
+                                    checked={selectedDownloads.includes(report.key)}
+                                    onChange={() => handleDownloadSelection(report.key)}
+                                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                />
+                                <label htmlFor={report.key} className="ml-3 text-xs font-medium text-gray-700 flex-1 cursor-pointer">
+                                    {report.name}
+                                </label>
+                            </div>
+                        ))}
+                    </div>
+                    <button
+                        onClick={downloadResults}
+                        disabled={selectedDownloads.length === 0}
+                        className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-300 transition"
+                    >
+                        <Download size={20} />
+                        Download Selected ({selectedDownloads.length}) Report{selectedDownloads.length !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+
 
                   {/* Structured Summary Tables */}
                   <div className="bg-gray-50 rounded-lg p-6">
@@ -948,7 +1011,7 @@
 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      **Five distinct Excel files** will be downloaded, including the **custom-structured summary for both Category A and Category B** in file 5. The output files now include the key **`Composite_ID`** column, along with **`Source_File`** and **`Appearance_Count`**.
+                      You can now selectively download the reports using the options above. All output files include the **`Composite_ID`**, **`Source_File`**, and **`Appearance_Count`** columns for traceability.
                     </p>
                   </div>
                 </div>
