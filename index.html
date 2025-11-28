@@ -32,7 +32,8 @@
     const CHUNK_SIZE = 50000; // Define chunk size for processing data (50k rows per worker message)
 
     // --- WEB WORKER SCRIPT ---
-    // Note: The content of the workerScript string must be escaped so Babel doesn't try to compile its internal template literals.
+    // The CHUNK_SIZE constant is injected using the template literal pattern: ${CHUNK_SIZE}
+    // All internal string constructions use simple concatenation to avoid syntax errors.
     const workerScript = `
         // Import the SheetJS library into the worker context
         importScripts('https://unpkg.com/xlsx/dist/xlsx.full.min.js');
@@ -59,7 +60,6 @@
                             // For CSV, read as text and parse using XLSX.read
                             const csvData = new Uint8Array(data);
                             const text = new TextDecoder('utf-8').decode(csvData);
-                            // Use XLSX read function for consistent parsing across formats
                             workbook = XLSX.read(text, { type: 'string' });
                             sheetName = workbook.SheetNames[0];
                         } else {
@@ -70,6 +70,7 @@
                         }
 
                         if (!workbook || !workbook.Sheets[sheetName]) {
+                             // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
                              return reject('Workbook or Sheet not found after reading file: ' + file.name);
                         }
 
@@ -88,16 +89,14 @@
                         const amountColIndex = headers.indexOf(amountColHeader);
 
                         if (idColIndex === -1 || amountColIndex === -1) {
-                            // Using standard string concatenation here to avoid template literal issues in workerScript definition
-                            return reject('Required column \'' + idColHeader + '\' or \'' + amountColHeader + '\' not found in file: ' + file.name);
+                            // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
+                            return reject('Required column \\'' + idColHeader + '\\' or \\'' + amountColHeader + '\\' not found in file: ' + file.name);
                         }
 
                         // Chunked Processing for Memory Optimization (Simulated)
                         const consolidatedData = [];
                         let totalRows = dataRows.length;
                         
-                        // NOTE: CHUNK_SIZE must be interpolated into the workerScript string itself using React/Babel template literals
-                        // For the worker's internal loop, we will use the injected CHUNK_SIZE variable
                         for (let i = 0; i < totalRows; i += ${CHUNK_SIZE}) { 
                             const chunk = dataRows.slice(i, i + ${CHUNK_SIZE});
                             
@@ -117,7 +116,7 @@
                                     });
                                 }
                             });
-                            // Report progress - using template literal inside worker
+                            // Report progress
                             postMessage({ 
                                 type: 'progress', 
                                 category: category, 
@@ -140,7 +139,6 @@
                 reader.onerror = (e) => reject(e.target.error);
 
                 // Read file as ArrayBuffer for both binary and CSV (CSV will be decoded later)
-                // This is the most memory-efficient way to handle the raw file data
                 reader.readAsArrayBuffer(file);
             });
         };
@@ -170,8 +168,8 @@
                     counter[id] = (counter[id] || 0) + 1;
                     
                     item.Match_Serial_No = counter[id];
-                    // Using template literal inside worker
-                    item.Composite_ID = \`\${id}_\${item.Match_Serial_No}\`;
+                    // FIX: Use simple concatenation to construct Composite_ID
+                    item.Composite_ID = id + '_' + item.Match_Serial_No;
                     item.Appearance_Count = appearanceCounts[id]; // Use global count for final report
                     
                     map.set(item.Composite_ID, item);
@@ -239,22 +237,22 @@
             // 4. Generate Summary Metrics
             const totalA = dfA.reduce((sum, item) => sum + item.Amount, 0);
             const totalB = dfB.reduce((sum, item) => sum + item.Amount, 0);
-            const matchedAmountA = matched.reduce((sum, item) => sum + item.Original_Amount_Value_A, 0);
-            const matchedAmountB = matched.reduce((sum, item) => sum + item.Original_Amount_Value_B, 0);
-            const unmatchedAmountA = unmatchedA.reduce((sum, item) => sum + item.Original_Amount_Value_A, 0);
-            const unmatchedAmountB = unmatchedB.reduce((sum, item) => sum + item.Original_Amount_Value_B, 0);
+            const matchedAmountA = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
+            const matchedAmountB = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
+            const unmatchedAmountA = unmatchedA.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
+            const unmatchedAmountB = unmatchedB.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
 
             const summary = [
                 { Category: '1. Matched Items (Category A)', Count: matched.length, Amount: matchedAmountA },
                 { Category: '2. Unmatched Items (Category A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
                 { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
                 { Category: '4. Total Consolidated Category A', Count: dfA.length, Amount: totalA },
-                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
+                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedA.reduce((s,i) => s + (i.Original_Amount_Value_A || 0), 0)) },
                 { Category: '6. Matched Items (Category B)', Count: matched.length, Amount: matchedAmountB },
                 { Category: '7. Unmatched Items (Category B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
                 { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
                 { Category: '9. Total Consolidated Category B', Count: dfB.length, Amount: totalB },
-                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
+                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedB.reduce((s,i) => s + (i.Original_Amount_Value_B || 0), 0)) },
                 { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
             ];
 
@@ -274,8 +272,8 @@
                         allDataA.push(...data);
                         data.length = 0; // Explicitly clear data
                     }
-                    // Using template literal inside worker
-                    postMessage({ type: 'status', message: \`Finished consolidating \${allDataA.length.toLocaleString()} rows for Category A.\` });
+                    // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
+                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A.' });
                     
                     // Step 2: Read and consolidate files for Category B
                     const allDataB = [];
@@ -284,8 +282,8 @@
                         allDataB.push(...data);
                         data.length = 0; // Explicitly clear data
                     }
-                    // Using template literal inside worker
-                    postMessage({ type: 'status', message: \`Finished consolidating \${allDataB.length.toLocaleString()} rows for Category B. Starting reconciliation...\` });
+                    // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
+                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataB.length.toLocaleString() + ' rows for Category B. Starting reconciliation...' });
 
                     // Step 3: Run Reconciliation
                     const results = runReconciliation(allDataA, allDataB);
@@ -355,7 +353,6 @@
             };
 
             newWorker.onerror = (e) => {
-                // Fixed template literal issue
                 setError('Worker Error: ' + e.message);
                 setProcessing(false);
             };
@@ -371,8 +368,12 @@
         const removeFile = (fileToRemove, category) => {
             if (category === 'A') {
                 setCategoryAFiles(prev => prev.filter(file => file !== fileToRemove));
+                // Clear columns if no files remain
+                if (categoryAFiles.length === 1 && availableColumnsA.length > 0) setAvailableColumnsA([]);
             } else {
                 setCategoryBFiles(prev => prev.filter(file => file !== fileToRemove));
+                // Clear columns if no files remain
+                if (categoryBFiles.length === 1 && availableColumnsB.length > 0) setAvailableColumnsB([]);
             }
         };
 
@@ -415,10 +416,10 @@
                         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                         
                         // Check if headers exist (i.e., the first row)
-                        headers = json[0] || [];
+                        const rawHeaders = json[0] || [];
                         
                         // Filter out undefined/null headers, convert to string
-                        const validHeaders = headers
+                        const validHeaders = rawHeaders
                             .map(h => String(h).trim())
                             .filter(h => h && h.length > 0);
                         
@@ -467,6 +468,8 @@
                     await extractColumns(files[0], setAvailableColumnsB);
                 }
             }
+            // Clear the input value so the same files can be re-uploaded if needed
+            e.target.value = null;
         };
 
         // Handle configuration step navigation and validation
@@ -514,11 +517,6 @@
             const ws_summary = XLSX.utils.json_to_sheet(results.summary);
             XLSX.utils.book_append_sheet(workbook, ws_summary, "1_Summary");
 
-            // Define optimized columns for detailed reports
-            const COLUMNS_A = ['Composite_ID', 'Original_ID_Value_A', 'Original_Amount_Value_A', 'Match_Serial_No_A', 'Appearance_Count_A', 'Source_File_A'];
-            const COLUMNS_B = ['Composite_ID', 'Original_ID_Value_B', 'Original_Amount_Value_B', 'Match_Serial_No_B', 'Appearance_Count_B', 'Source_File_B'];
-            const COLUMNS_MATCHED = ['Composite_ID', 'Remark', ...COLUMNS_A.slice(1), ...COLUMNS_B.slice(1)];
-            
             // 2. Matched Records
             const matchedForDownload = results.matched.map(item => ({
                 'Composite_ID': item.Composite_ID,
@@ -596,7 +594,7 @@
         const FileList = ({ files, category, removeFile }) => (
             <div className="mt-4 space-y-2">
                 {files.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <div key={file.name + index} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
                         <div className="flex items-center truncate">
                             <FileSpreadsheet className="w-5 h-5 mr-2 text-blue-500 flex-shrink-0" />
                             <span className="text-sm font-medium text-gray-700 truncate">{file.name}</span>
@@ -785,7 +783,9 @@
                     {/* STEP 2: PROCESSING */}
                     {step === 2 && (
                         <div className="max-w-2xl mx-auto p-8 bg-white rounded-xl shadow-2xl border border-blue-100">
-                            <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Processing Data in Background Worker...</h2>
+                            <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
+                                {processing ? 'Processing Data in Background Worker...' : 'Reconciliation Setup Complete'}
+                            </h2>
                             
                             {processing ? (
                                 <div>
@@ -822,6 +822,9 @@
                                 </div>
                             ) : (
                                 <div className="text-center">
+                                    <p className="text-gray-600 mb-6">
+                                        Files and column mappings are ready. Click below to begin the reconciliation process.
+                                    </p>
                                     <button
                                         onClick={startReconciliation}
                                         className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-green-600 hover:bg-green-700 transition duration-150 shadow-xl"
