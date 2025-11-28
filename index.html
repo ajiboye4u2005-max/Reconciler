@@ -3,874 +3,783 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reconciliation Engine (Binary String Header Fix)</title>
-    <!-- React and Babel for component structure -->
+    <title>Advanced Reconciliation Tool (Layered ID Extraction)</title>
+    <!-- Load React and ReactDOM from CDN -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Load Babel for JSX transpilation in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Tailwind CSS for styling -->
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS (xlsx) for all Excel/CSV formats (XLSX, XLS, CSV) -->
+    <!-- Load SheetJS/XLSX for Excel file handling -->
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-    <style>
-        .font-sans { font-family: 'Inter', sans-serif; }
-    </style>
 </head>
-<body>
+<body class="bg-gray-50 min-h-screen font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
+    // Destructure hooks from the global React object for easy access (FIX: addresses ReferenceError: useState is not defined)
+    const { useState, useEffect, useCallback, useMemo } = React;
     
-    // --- ICON PLACEHOLDERS ---
+    // --- ICON PLACEHOLDERS (Replacing lucide-react imports for single-file HTML) ---
     const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
-        <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
+        <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color, flexShrink: 0 }}>{children}</span>
     );
-    const Upload = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></IconWrapper>;
-    const FileSpreadsheet = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></IconWrapper>;
-    const AlertCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></IconWrapper>;
-    const CheckCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14 9 11"/></svg></IconWrapper>;
-    const Download = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></IconWrapper>;
-    const X = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></IconWrapper>;
+    // Using Emojis or simple characters as placeholders
+    const Upload = (props) => <IconWrapper {...props}><span role="img" aria-label="Upload">⤒</span></IconWrapper>;
+    const FileSpreadsheet = (props) => <IconWrapper {...props}><span role="img" aria-label="Spreadsheet">🧾</span></IconWrapper>;
+    const AlertCircle = (props) => <IconWrapper {...props} color="rgb(239 68 68)"><span role="img" aria-label="Error Alert">⚠️</span></IconWrapper>; // Red
+    const CheckCircle = (props) => <IconWrapper {...props} color="rgb(34 197 94)"><span role="img" aria-label="Success Check">✅</span></IconWrapper>; // Green
+    const Download = (props) => <IconWrapper {...props}><span role="img" aria-label="Download">⬇️</span></IconWrapper>;
+    const X = (props) => <IconWrapper {...props}><span role="img" aria-label="Close">❌</span></IconWrapper>;
+    const Info = (props) => <IconWrapper {...props}><span role="img" aria-label="Info">ℹ️</span></IconWrapper>;
 
-    const CHUNK_SIZE = 50000; // Define chunk size for processing data (50k rows per worker message)
 
-    // --- WEB WORKER SCRIPT ---
-    // This script contains the logic for reading the *entire* file and running reconciliation
-    const workerScript = `
-        // Import the SheetJS library into the worker context
-        importScripts('https://unpkg.com/xlsx/dist/xlsx.full.min.js');
+    // --- UTILITY FUNCTIONS ---
 
-        // Helper function for array buffer to binary string conversion (Used only for binary formats)
-        const fixdata = (data) => {
-            let o = "", l = 0, w = 10240;
-            for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
-            o+=String.fromCharCode.apply(null, new Uint8Array(data.slice(l*w)));
-            return o;
-        };
-
-        // --- CORE DATA READING FUNCTION (Web Worker - Uses ArrayBuffer for performance) ---
-        // CRITICAL NOTE: This function reads the file as ArrayBuffer, which is the fastest way 
-        // to transfer large data to the worker, despite ArrayBuffer failing for header extraction
-        // in the main thread for specific corrupted files.
-        const readAndProcessFile = async (file, config, category) => {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                
-                reader.onload = (e) => {
-                    try {
-                        const data = e.target.result;
-                        let workbook;
-                        let sheetName;
-
-                        const fileNameLower = file.name.toLowerCase();
-                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
-
-                        if (isTextFile) {
-                            // For CSV, decode the ArrayBuffer to text and then read
-                            const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
-                            workbook = XLSX.read(text, { type: 'string' });
-                            sheetName = workbook.SheetNames[0];
-                        } else {
-                            // For binary formats (XLSX, XLS), convert ArrayBuffer to binary string
-                            const binary = fixdata(data);
-                            workbook = XLSX.read(binary, { type: 'binary' });
-                            sheetName = workbook.SheetNames[0];
-                        }
-
-                        if (!workbook || !workbook.Sheets[sheetName]) {
-                             return reject('Workbook or Sheet not found after reading file: ' + file.name);
-                        }
-
-                        const worksheet = workbook.Sheets[sheetName];
-                        // Read all rows into an array of arrays
-                        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-                        // Extract headers from the first row (index 0)
-                        const headers = json[0] || [];
-                        const dataRows = json.slice(1);
-                        
-                        const idColHeader = category === 'A' ? config.uniqueIdA : config.uniqueIdB;
-                        const amountColHeader = category === 'A' ? config.amountA : config.amountB;
-
-                        // Ensure headers are strings for indexOf to work reliably
-                        const stringHeaders = headers.map(h => String(h).trim());
-
-                        const idColIndex = stringHeaders.indexOf(idColHeader);
-                        const amountColIndex = stringHeaders.indexOf(amountColHeader);
-
-                        if (idColIndex === -1 || amountColIndex === -1) {
-                            return reject(\`Required column '\${idColHeader}' or '\${amountColHeader}' not found in file: \${file.name}. Found headers: \${stringHeaders.join(', ')}\`);
-                        }
-
-                        // Chunked Processing
-                        const consolidatedData = [];
-                        let totalRows = dataRows.length;
-                        
-                        for (let i = 0; i < totalRows; i += ${CHUNK_SIZE}) { 
-                            const chunk = dataRows.slice(i, i + ${CHUNK_SIZE});
-                            
-                            chunk.forEach(row => {
-                                // IMPORTANT: Use String() conversion and trim to handle IDs that might be numeric or empty in the source
-                                const originalId = String(row[idColIndex] || '').trim();
-                                // Ensure amount parsing is robust, treating non-numbers as 0
-                                const originalAmount = parseFloat(row[amountColIndex]) || 0;
-                                
-                                // Only process rows with a non-empty ID and non-zero amount
-                                if (originalId && originalAmount !== 0) {
-                                    consolidatedData.push({
-                                        Unique_ID_Original: originalId,
-                                        Amount: originalAmount,
-                                        Source_File: file.name,
-                                        Original_ID_Value: originalId, // Preserve for final report
-                                        Original_Amount_Value: originalAmount, // Preserve for final report
-                                    });
-                                }
-                            });
-                            // Report progress back to the main thread
-                            postMessage({ 
-                                type: 'progress', 
-                                category: category, 
-                                progress: Math.min(100, Math.ceil(((i + chunk.length) / totalRows) * 100)) 
-                            });
-                        }
-                        
-                        // Explicitly nullify large objects for GC hint
-                        workbook = null;
-                        worksheet = null;
-                        
-                        resolve(consolidatedData);
-                        
-                    } catch (e) {
-                        console.error("Worker read error:", e);
-                        reject(e.toString());
-                    }
-                };
-                
-                reader.onerror = (e) => reject(e.target.error);
-
-                // Use ArrayBuffer for performance inside the worker
-                reader.readAsArrayBuffer(file);
-            });
-        };
-
-        // --- RECONCILIATION LOGIC ---
-        const runReconciliation = (dataA, dataB) => {
-            // 1. Combine all data into temporary map for appearance count
-            const allData = [...dataA, ...dataB];
-            const appearanceCounts = {};
-            
-            allData.forEach(item => {
-                const key = item.Unique_ID_Original;
-                appearanceCounts[key] = (appearanceCounts[key] || 0) + 1;
-            });
-            
-            // 2. Generate Composite IDs and create indexed maps
-            const dfB_map = new Map();
-
-            // Function to process and index a category
-            const processCategory = (data, map) => {
-                let counter = {};
-                
-                data.forEach(item => {
-                    const id = item.Unique_ID_Original;
-                    // Calculate appearance count based on unique ID for this file
-                    counter[id] = (counter[id] || 0) + 1;
-                    
-                    item.Match_Serial_No = counter[id];
-                    // Composite ID ensures uniqueness for non-1:1 matches
-                    item.Composite_ID = id + '_' + item.Match_Serial_No;
-                    item.Appearance_Count = appearanceCounts[id]; // Use global count for final report
-                    
-                    if (map) map.set(item.Composite_ID, item);
-                });
-                return data;
-            };
-
-            const dfA = processCategory(dataA);
-            const dfB = processCategory(dataB, dfB_map);
-
-            // 3. Perform Reconciliation (simulating outer join)
-            const matched = [];
-            const unmatchedA = [];
-            const unmatchedB = [];
-
-            // A-side iteration (A & B Match or A Unmatched)
-            dfA.forEach(itemA => {
-                const compositeId = itemA.Composite_ID;
-                const itemB = dfB_map.get(compositeId);
-
-                const baseRecord = {
-                    Composite_ID: compositeId,
-                    Original_ID_Value_A: itemA.Original_ID_Value,
-                    Original_Amount_Value_A: itemA.Original_Amount_Value,
-                    Match_Serial_No_A: itemA.Match_Serial_No,
-                    Appearance_Count_A: itemA.Appearance_Count,
-                    Source_File_A: itemA.Source_File,
-                };
-                
-                if (itemB) {
-                    matched.push({
-                        ...baseRecord,
-                        Original_ID_Value_B: itemB.Original_ID_Value,
-                        Original_Amount_Value_B: itemB.Original_Amount_Value,
-                        Match_Serial_No_B: itemB.Match_Serial_No,
-                        Appearance_Count_B: itemB.Appearance_Count,
-                        Source_File_B: itemB.Source_File,
-                        // Determine remark based on global appearance count
-                        Remark: itemA.Appearance_Count > 1 || itemB.Appearance_Count > 1 
-                            ? 'Matched - Excess (1:M or M:1 Line)' 
-                            : 'Matched - 1:1 Line Item'
-                    });
-                    // Remove from B map so it's not counted as unmatched later
-                    dfB_map.delete(compositeId);
-                } else {
-                    unmatchedA.push({
-                        ...baseRecord,
-                        Remark: 'Unmatched in Category B'
-                    });
-                }
-            });
-
-            // B-side iteration (B Unmatched - remaining items in map)
-            dfB_map.forEach(itemB => {
-                unmatchedB.push({
-                    Composite_ID: itemB.Composite_ID,
-                    Original_ID_Value_B: itemB.Original_ID_Value,
-                    Original_Amount_Value_B: itemB.Original_Amount_Value,
-                    Match_Serial_No_B: itemB.Match_Serial_No,
-                    Appearance_Count_B: itemB.Appearance_Count,
-                    Source_File_B: itemB.Source_File,
-                    Remark: 'Unmatched in Category A'
-                });
-            });
-
-            // 4. Generate Summary Metrics
-            // Calculate totals (Category A & B)
-            const totalA = dfA.reduce((sum, item) => sum + item.Amount, 0);
-            const totalB = dfB.reduce((sum, item) => sum + item.Amount, 0);
-            
-            // Calculate matched and unmatched amounts
-            const matchedAmountA = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
-            const matchedAmountB = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
-            const unmatchedAmountA = unmatchedA.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
-            const unmatchedAmountB = unmatchedB.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
-            
-            // The sum of matched and unmatched should equal the total consolidated amount (within floating point precision)
-            const totalRecA = matchedAmountA + unmatchedAmountA;
-            const totalRecB = matchedAmountB + unmatchedAmountB;
-
-            const summary = [
-                { Category: '1. Matched Items (Category A)', Count: matched.length, Amount: matchedAmountA },
-                { Category: '2. Unmatched Items (Category A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
-                { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: totalRecA },
-                { Category: '4. Total Consolidated Category A', Count: dfA.length, Amount: totalA },
-                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - totalRecA },
-                { Category: '6. Matched Items (Category B)', Count: matched.length, Amount: matchedAmountB },
-                { Category: '7. Unmatched Items (Category B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
-                { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: totalRecB },
-                { Category: '9. Total Consolidated Category B', Count: dfB.length, Amount: totalB },
-                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - totalRecB },
-                { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
-            ];
-
-            return { summary, matched, unmatchedA, unmatchedB, dfA, dfB };
-        };
-
-        // --- WORKER MESSAGE HANDLER ---
-        onmessage = async (e) => {
-            const { action, filesA, filesB, config } = e.data;
-            
-            if (action === 'PROCESS_DATA') {
+    // Utility function to convert files to an array of objects
+    const processFile = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
                 try {
-                    // Step 1: Read and consolidate files for Category A
-                    const allDataA = [];
-                    for (const file of filesA) {
-                        const data = await readAndProcessFile(file, config, 'A');
-                        allDataA.push(...data);
-                        data.length = 0;
-                    }
-                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A. Starting Category B...' });
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                     
-                    // Step 2: Read and consolidate files for Category B
-                    const allDataB = [];
-                    for (const file of filesB) {
-                        const data = await readAndProcessFile(file, config, 'B');
-                        allDataB.push(...data);
-                        data.length = 0;
+                    if (json.length === 0) {
+                        return reject(new Error(`File ${file.name} is empty or invalid.`));
                     }
-                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataB.length.toLocaleString() + ' rows for Category B. Starting reconciliation...' });
+                    
+                    const headers = json[0];
+                    const rows = json.slice(1);
+                    
+                    const processedData = rows.map((row, index) => {
+                        const rowObject = {};
+                        headers.forEach((header, i) => {
+                            // Trim header and ensure keys are clean strings
+                            const key = String(header).trim();
+                            // If row value is undefined or null, default to empty string
+                            rowObject[key] = row[i] !== undefined && row[i] !== null ? row[i] : ''; 
+                        });
+                        // Add original file name and row index for traceability
+                        rowObject['__Source_File'] = file.name;
+                        rowObject['__Original_Row_Index'] = index + 2; // +1 for 0-based index, +1 for header row
+                        return rowObject;
+                    });
 
-                    // Step 3: Run Reconciliation
-                    const results = runReconciliation(allDataA, allDataB);
-                    
-                    allDataA.length = 0;
-                    allDataB.length = 0;
-                    
-                    postMessage({ type: 'result', results });
+                    resolve({ fileName: file.name, data: processedData, headers });
 
                 } catch (error) {
-                    postMessage({ type: 'error', error: error.toString() });
+                    reject(new Error(`Error processing ${file.name}: ${error.message}`));
                 }
-            }
-        };
-    `;
+            };
+            reader.onerror = (error) => reject(new Error(`File reading failed: ${error.message}`));
+            reader.readAsArrayBuffer(file);
+        });
+    };
 
-    // --- REACT COMPONENT ---
+    // --- COMPONENTS ---
+
+    // Component for displaying file upload status and removing files
+    const FileList = ({ files, onRemove }) => (
+        <ul className="space-y-2">
+            {files.map((file, index) => (
+                <li key={index} className="flex items-center justify-between p-2 bg-white border border-gray-200 rounded-lg text-sm">
+                    <div className="flex items-center min-w-0 pr-4">
+                        <FileSpreadsheet className="text-blue-500 mr-2" size={16} />
+                        <span className="truncate font-medium text-gray-700" title={file.name}>{file.name}</span>
+                    </div>
+                    <button 
+                        onClick={() => onRemove(index)}
+                        className="p-1 rounded-full text-red-500 hover:bg-red-100 transition duration-150"
+                        title="Remove file"
+                    >
+                        <X size={16} />
+                    </button>
+                </li>
+            ))}
+        </ul>
+    );
+
+    // Component for the main summary table
+    const SummaryTable = ({ metrics, category }) => (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+            <h4 className="text-lg font-semibold mb-3 text-gray-700">{category} Metrics</h4>
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <tbody className="divide-y divide-gray-100">
+                        {metrics.map((metric, index) => (
+                            <tr key={index} className={metric.value > 0 && metric.key.includes('Unmatched') ? 'bg-red-50' : ''}>
+                                <td className="py-2 pr-4 text-sm font-medium text-gray-900">{metric.label}</td>
+                                <td className="py-2 pl-4 text-sm font-semibold text-right text-gray-800">
+                                    {metric.format === 'count' ? metric.value.toLocaleString() : 
+                                     metric.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+
+
+    // --- MAIN APP COMPONENT ---
+
     const ReconciliationApp = () => {
-        const [step, setStep] = React.useState(1);
-        const [categoryAFiles, setCategoryAFiles] = React.useState([]);
-        const [categoryBFiles, setCategoryBFiles] = React.useState([]);
-        const [columnConfig, setColumnConfig] = React.useState({
+        // State variables
+        const [step, setStep] = useState(1);
+        const [categoryAFiles, setCategoryAFiles] = useState([]);
+        const [categoryBFiles, setCategoryBFiles] = useState([]);
+        const [columnConfig, setColumnConfig] = useState({
             uniqueIdA: '',
             uniqueIdB: '',
             amountA: '',
             amountB: ''
         });
-        const [availableColumnsA, setAvailableColumnsA] = React.useState([]);
-        const [availableColumnsB, setAvailableColumnsB] = React.useState([]);
-        const [processing, setProcessing] = React.useState(false);
-        const [progressA, setProgressA] = React.useState(0);
-        const [progressB, setProgressB] = React.useState(0);
-        const [statusMessage, setStatusMessage] = React.useState('Awaiting file uploads...');
-        const [results, setResults] = React.useState(null);
-        const [error, setError] = React.useState(null);
-        const [worker, setWorker] = React.useState(null);
+        const [availableColumnsA, setAvailableColumnsA] = useState([]);
+        const [availableColumnsB, setAvailableColumnsB] = useState([]);
+        const [processing, setProcessing] = useState(false);
+        const [results, setResults] = useState(null);
+        const [error, setError] = useState(null);
+        const [selectedDownloads, setSelectedDownloads] = useState(['summary', 'matched', 'unmatchedA', 'unmatchedB']);
 
-        // Effect to initialize Web Worker
-        React.useEffect(() => {
-            if (worker) return;
-            
-            const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
-            const newWorker = new Worker(URL.createObjectURL(workerBlob));
 
-            newWorker.onmessage = (e) => {
-                if (e.data.type === 'error') {
-                    setError(e.data.error);
-                    setProcessing(false);
-                    setStatusMessage('Error during reconciliation.');
-                } else if (e.data.type === 'progress') {
-                    if (e.data.category === 'A') setProgressA(e.data.progress);
-                    if (e.data.category === 'B') setProgressB(e.data.progress);
-                } else if (e.data.type === 'status') {
-                    setStatusMessage(e.data.message);
-                } else if (e.data.type === 'result') {
-                    setResults(e.data.results);
-                    setProcessing(false);
-                    setStatusMessage('Reconciliation Complete!');
-                    setStep(3); // Move to results step
-                }
-            };
+        // --- HANDLERS ---
 
-            newWorker.onerror = (e) => {
-                setError('Worker Error: ' + e.message);
-                setProcessing(false);
-            };
-
-            setWorker(newWorker);
-
-            // Cleanup function
-            return () => {
-                newWorker.terminate();
-            };
-        }, []);
-
-        const removeFile = (fileToRemove, category) => {
-            if (category === 'A') {
-                const newFiles = categoryAFiles.filter(file => file !== fileToRemove);
-                setCategoryAFiles(newFiles);
-                if (newFiles.length > 0) {
-                    extractColumns(newFiles[0], setAvailableColumnsA);
-                } else {
-                    setAvailableColumnsA([]);
-                    setColumnConfig(prev => ({ ...prev, uniqueIdA: '', amountA: '' }));
-                }
-            } else {
-                const newFiles = categoryBFiles.filter(file => file !== fileToRemove);
-                setCategoryBFiles(newFiles);
-                if (newFiles.length > 0) {
-                    extractColumns(newFiles[0], setAvailableColumnsB);
-                } else {
-                    setAvailableColumnsB([]);
-                    setColumnConfig(prev => ({ ...prev, uniqueIdB: '', amountB: '' }));
-                }
-            }
-        };
-
-        // --- NEW STRATEGY: BINARY STRING HEADER EXTRACTION ---
-        // Uses readAsBinaryString to potentially bypass low-level ArrayBuffer decompression errors
-        const extractColumns = async (file, setColumns) => {
-            setError(null);
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                
-                reader.onload = (e) => {
-                    try {
-                        const data = e.target.result;
-                        let workbook;
-                        
-                        const fileNameLower = file.name.toLowerCase();
-                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
-
-                        if (isTextFile) {
-                            // Decode to string for CSV
-                            // We assume the file is small enough for header extraction to be read in full
-                            workbook = XLSX.read(data, { type: 'string' });
-                        } else {
-                            // CRITICAL FIX: Use the raw binary string and force SheetJS to read it as binary
-                            workbook = XLSX.read(data, { type: 'binary', cellDates: true, raw: true });
-                        }
-                        
-                        if (!workbook || workbook.SheetNames.length === 0) {
-                             console.error("SheetJS failed to create workbook:", file.name);
-                             setError("File seems corrupted or empty. Cannot read workbook.");
-                             resolve([]);
-                             return;
-                        }
-
-                        const sheetName = workbook.SheetNames[0];
-                        const worksheet = workbook.Sheets[sheetName];
-                        
-                        // Get data as an array of arrays
-                        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                        
-                        const rawHeaders = json[0] || [];
-                        
-                        // Clean and validate headers
-                        const validHeaders = rawHeaders
-                            .map(h => String(h).trim())
-                            .filter(h => h && h.length > 0);
-                        
-                        if (validHeaders.length === 0) {
-                             console.error("No valid headers found in the first row of file:", file.name);
-                             setError("No valid headers found. Ensure the first row contains headers.");
-                             resolve([]);
-                             return;
-                        }
-
-                        setColumns(validHeaders);
-                        resolve(validHeaders);
-
-                    } catch (e) {
-                        console.error("Header extraction fatal error:", e);
-                        setError(`CRITICAL ERROR reading file headers. Details: ${e.message}. This is likely due to a corrupted XLSX file structure. Please try saving the file as a plain CSV or a new XLSX file from your desktop application and re-uploading.`);
-                        resolve([]);
-                    }
-                };
-                
-                reader.onerror = (e) => {
-                    console.error("FileReader error:", e);
-                    setError("Failed to read file from disk. Try a different file.");
-                    resolve([]);
-                };
-
-                // CRITICAL CHANGE: Use readAsBinaryString() instead of readAsArrayBuffer()
-                reader.readAsBinaryString(file);
-            });
-        };
-
-        // Handle file upload and column extraction
-        const handleFileUpload = async (e, category) => {
+        const handleFileUpload = useCallback(async (e, category) => {
             setError(null);
             const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            const targetSetFiles = category === 'A' ? setCategoryAFiles : setCategoryBFiles;
+            const targetSetColumns = category === 'A' ? setAvailableColumnsA : setAvailableColumnsB;
+            const currentColumns = category === 'A' ? availableColumnsA : availableColumnsB;
             
-            if (category === 'A') {
-                const newFiles = [...categoryAFiles, ...files];
-                setCategoryAFiles(newFiles);
-                if (availableColumnsA.length === 0 && newFiles.length > 0) {
-                    await extractColumns(newFiles[0], setAvailableColumnsA);
+            targetSetFiles(prev => [...prev, ...files]);
+
+            // Only extract columns from the first file in a category
+            if (currentColumns.length === 0) {
+                try {
+                    const { headers } = await processFile(files[0]);
+                    // Filter out internal columns
+                    const cleanHeaders = headers.filter(h => h && !String(h).startsWith('__')).map(h => String(h).trim()).filter(h => h.length > 0);
+                    targetSetColumns(cleanHeaders);
+                    
+                    // Auto-select columns if possible (simple heuristic)
+                    if (category === 'A') {
+                        const autoId = cleanHeaders.find(h => h.toLowerCase().includes('ref') || h.toLowerCase().includes('id'));
+                        const autoAmount = cleanHeaders.find(h => h.toLowerCase().includes('amount') || h.toLowerCase().includes('debit') || h.toLowerCase().includes('credit'));
+                        setColumnConfig(prev => ({
+                            ...prev,
+                            uniqueIdA: autoId || '',
+                            amountA: autoAmount || ''
+                        }));
+                    } else {
+                        const autoId = cleanHeaders.find(h => h.toLowerCase().includes('ref') || h.toLowerCase().includes('id'));
+                        const autoAmount = cleanHeaders.find(h => h.toLowerCase().includes('amount') || h.toLowerCase().includes('debit') || h.toLowerCase().includes('credit'));
+                         setColumnConfig(prev => ({
+                            ...prev,
+                            uniqueIdB: autoId || '',
+                            amountB: autoAmount || ''
+                        }));
+                    }
+
+                } catch (err) {
+                    setError(err.message);
+                    targetSetFiles(prev => prev.filter(f => f.name !== files[0].name)); // Remove file if parsing failed
                 }
-            } else {
-                const newFiles = [...categoryBFiles, ...files];
-                setCategoryBFiles(newFiles);
-                if (availableColumnsB.length === 0 && newFiles.length > 0) {
-                    await extractColumns(newFiles[0], setAvailableColumnsB);
-                }
             }
-            e.target.value = null;
-        };
+        }, [availableColumnsA, availableColumnsB]);
 
-        // Handle configuration step navigation and validation
-        const handleConfigSubmit = () => {
-            if (!columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB) {
-                setError("Please select all four required columns for both categories.");
-                return;
+        const handleRemoveFile = useCallback((index, category) => {
+            const targetSetFiles = category === 'A' ? setCategoryAFiles : setCategoryBFiles;
+            targetSetFiles(prev => prev.filter((_, i) => i !== index));
+
+            // If the last file is removed, clear column config and available columns
+            if (category === 'A' && categoryAFiles.length === 1) {
+                setAvailableColumnsA([]);
+                setColumnConfig(prev => ({...prev, uniqueIdA: '', amountA: ''}));
             }
-            // Step 2 validation is now complete, proceed to Step 2/Processing
-            setStep(2);
-        };
-
-        // --- STEP 2: START RECONCILIATION (Offload to Worker) ---
-        const startReconciliation = () => {
-            if (!worker) {
-                setError("Worker not initialized. Please refresh.");
-                return;
+            if (category === 'B' && categoryBFiles.length === 1) {
+                setAvailableColumnsB([]);
+                setColumnConfig(prev => ({...prev, uniqueIdB: '', amountB: ''}));
             }
-            if (processing) return;
+        }, [categoryAFiles, categoryBFiles]);
 
+        const reconcileData = useCallback(async () => {
+            setError(null);
             setProcessing(true);
             setResults(null);
-            setError(null);
-            setProgressA(0);
-            setProgressB(0);
-            setStatusMessage('Starting data consolidation on background worker...');
 
-            // Send files and config to the Web Worker
-            worker.postMessage({
-                action: 'PROCESS_DATA',
-                filesA: categoryAFiles,
-                filesB: categoryBFiles,
-                config: columnConfig
-            });
-        };
+            const { uniqueIdA, uniqueIdB, amountA, amountB } = columnConfig;
 
-        // --- STEP 3: DOWNLOAD LOGIC ---
-        const downloadReport = () => {
-            if (!results) return;
+            if (!uniqueIdA || !uniqueIdB || !amountA || !amountB || categoryAFiles.length === 0 || categoryBFiles.length === 0) {
+                setError("Please select files and configure all four required columns before reconciling.");
+                setProcessing(false);
+                return;
+            }
 
-            const workbook = XLSX.utils.book_new();
-            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+            try {
+                // 1. Process all files and consolidate data
+                const aPromises = categoryAFiles.map(file => processFile(file));
+                const bPromises = categoryBFiles.map(file => processFile(file));
 
-            // Helper for creating report data with dynamic column names
-            const createReportSheet = (data, uniqueIdKey, amountKey, remarkKey = 'Remark') => {
-                const sheetData = data.map(item => {
-                    const row = {
-                        'Composite_ID': item.Composite_ID,
-                        [remarkKey]: item[remarkKey],
-                    };
-                    
-                    // Fields for Matched/Unmatched (Outer Join structure)
-                    if (item.Original_ID_Value_A !== undefined) {
-                        row[columnConfig.uniqueIdA] = item.Original_ID_Value_A;
-                        row[columnConfig.amountA] = item.Original_Amount_Value_A;
-                        row['Match_Serial_No_A'] = item.Match_Serial_No_A;
-                        row['Appearance_Count_A'] = item.Appearance_Count_A;
-                        row['Source_File_A'] = item.Source_File_A;
-                    }
-                    
-                    if (item.Original_ID_Value_B !== undefined) {
-                        row[columnConfig.uniqueIdB] = item.Original_ID_Value_B;
-                        row[columnConfig.amountB] = item.Original_Amount_Value_B;
-                        row['Match_Serial_No_B'] = item.Match_Serial_No_B;
-                        row['Appearance_Count_B'] = item.Appearance_Count_B;
-                        row['Source_File_B'] = item.Source_File_B;
-                    }
+                const allAPromises = await Promise.all(aPromises);
+                const allBPromises = await Promise.all(bPromises);
 
-                    // For Consolidated sheets, data structure is simpler
-                    if (item.Original_ID_Value !== undefined) {
-                         row[uniqueIdKey] = item.Original_ID_Value;
-                         row[amountKey] = item.Original_Amount_Value;
-                         row['Match_Serial_No'] = item.Match_Serial_No;
-                         row['Appearance_Count'] = item.Appearance_Count;
-                         row['Source_File'] = item.Source_File;
-                    }
-
-                    return row;
-                });
-                return XLSX.utils.json_to_sheet(sheetData);
-            };
-
-            // 1. Summary Sheet
-            const ws_summary = XLSX.utils.json_to_sheet(results.summary);
-            XLSX.utils.book_append_sheet(workbook, ws_summary, "1_Summary");
-
-            // 2. Matched Records
-            const ws_matched = createReportSheet(results.matched);
-            XLSX.utils.book_append_sheet(workbook, ws_matched, "2_Matched_Records");
-
-            // 3. Unmatched Category A
-            const ws_unmatchedA = createReportSheet(results.unmatchedA, columnConfig.uniqueIdA, columnConfig.amountA, 'Remark');
-            XLSX.utils.book_append_sheet(workbook, ws_unmatchedA, "3_Unmatched_Category_A");
-
-            // 4. Unmatched Category B
-            const ws_unmatchedB = createReportSheet(results.unmatchedB, columnConfig.uniqueIdB, columnConfig.amountB, 'Remark');
-            XLSX.utils.book_append_sheet(workbook, ws_unmatchedB, "4_Unmatched_Category_B");
-            
-            // 5. Consolidated Data A (For audit) - Note: Passing dummy keys for consolidated view
-            const ws_dfA = createReportSheet(results.dfA, columnConfig.uniqueIdA, columnConfig.amountA, 'Source_File');
-            XLSX.utils.book_append_sheet(workbook, ws_dfA, "5_Consolidated_A");
-
-            // 6. Consolidated Data B (For audit)
-            const ws_dfB = createReportSheet(results.dfB, columnConfig.uniqueIdB, columnConfig.amountB, 'Source_File');
-            XLSX.utils.book_append_sheet(workbook, ws_dfB, "6_Consolidated_B");
-
-            XLSX.writeFile(workbook, `Reconciliation_Report_${timestamp}.xlsx`);
-        };
-
-
-        // --- UI COMPONENTS ---
-        const FileList = ({ files, category, removeFile }) => (
-            <div className="mt-4 space-y-2">
-                {files.map((file, index) => (
-                    <div key={file.name + index} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
-                        <div className="flex items-center truncate">
-                            <FileSpreadsheet className="w-5 h-5 mr-2 text-blue-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-700 truncate">{file.name}</span>
-                        </div>
-                        <button 
-                            onClick={() => removeFile(file, category)}
-                            className="text-gray-400 hover:text-red-500 p-1 rounded-full transition duration-150"
-                            title="Remove file"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-                    </div>
-                ))}
-            </div>
-        );
-
-        const FileUploadSection = ({ category, files, availableColumns, columnConfig, setColumnConfig }) => (
-            <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-lg">
-                <h2 className="text-xl font-bold mb-4 text-gray-800 flex items-center">
-                    <span className={`w-8 h-8 flex items-center justify-center mr-3 rounded-full ${category === 'A' ? 'bg-indigo-500' : 'bg-red-500'} text-white`}>{category}</span>
-                    Category {category} Files
-                </h2>
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition duration-150">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <Upload className="w-6 h-6 mb-2 text-gray-500" />
-                        <p className="mb-2 text-sm text-gray-500"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                        <p className="text-xs text-gray-500">(Supports XLSX, XLS, CSV files)</p>
-                    </div>
-                    <input 
-                        type="file" 
-                        multiple 
-                        accept=".xlsx,.xls,.csv" 
-                        onChange={(e) => handleFileUpload(e, category)} 
-                        className="hidden" 
-                    />
-                </label>
-                <FileList files={files} category={category} removeFile={removeFile} />
+                let allAData = [];
+                allAPromises.forEach(p => { allAData = allAData.concat(p.data); });
+                let allBData = [];
+                allBPromises.forEach(p => { allBData = allBData.concat(p.data); });
                 
-                {files.length > 0 && availableColumns.length > 0 && (
-                    <div className="mt-6 pt-4 border-t border-gray-200 space-y-4">
-                        <h3 className="font-semibold text-lg text-gray-700">Select Mapping Columns</h3>
-                        
-                        {/* Unique ID Column Select */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Unique ID Column</label>
-                            <select
-                                value={category === 'A' ? columnConfig.uniqueIdA : columnConfig.uniqueIdB}
-                                onChange={(e) => setColumnConfig(prev => ({ ...prev, [category === 'A' ? 'uniqueIdA' : 'uniqueIdB']: e.target.value }))}
-                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            >
-                                <option value="">--- Select Unique ID ---</option>
-                                {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                            </select>
-                        </div>
-                        
-                        {/* Amount Column Select */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Amount Column</label>
-                            <select
-                                value={category === 'A' ? columnConfig.amountA : columnConfig.amountB}
-                                onChange={(e) => setColumnConfig(prev => ({ ...prev, [category === 'A' ? 'amountA' : 'amountB']: e.target.value }))}
-                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            >
-                                <option value="">--- Select Amount Column ---</option>
-                                {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                            </select>
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
+                // Helper to create a unique ID for matching.
+                const generateCompositeID = (row, uniqueCol, amountCol) => {
+                    const uniqueVal = String(row[uniqueCol]).trim().toUpperCase();
+                    // Normalize amount: round to 2 decimal places and ensure it's a number
+                    const amountVal = (typeof row[amountCol] === 'number' ? row[amountCol] : parseFloat(String(row[amountCol]).replace(/[^0-9.-]/g, '')) || 0);
+                    const roundedAmount = parseFloat(amountVal.toFixed(2));
+                    
+                    // Create a composite key: UniqueID + Amount (rounded)
+                    return `${uniqueVal}_${roundedAmount}`;
+                };
 
-        const ProgressStepper = ({ step }) => (
-            <div className="flex justify-between items-center mb-10">
-                {[1, 2, 3].map((s) => (
-                    <React.Fragment key={s}>
-                        <div className="flex flex-col items-center">
-                            <div className={`w-10 h-10 flex items-center justify-center rounded-full font-bold transition-colors duration-300 
-                                ${s === step ? 'bg-blue-600 text-white shadow-lg' : s < step ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
-                                {s < step ? <CheckCircle className="w-6 h-6" /> : s}
-                            </div>
-                            <span className={`mt-2 text-sm font-medium ${s === step ? 'text-blue-600' : 'text-gray-500'}`}>
-                                {s === 1 ? 'Upload & Map' : s === 2 ? 'Processing' : 'Results'}
-                            </span>
-                        </div>
-                        {s < 3 && (
-                            <div className={`flex-1 h-1 mx-2 transition-colors duration-300 ${s < step ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-                        )}
-                    </React.Fragment>
-                ))}
-            </div>
-        );
-        
-        const SummaryTable = ({ summary }) => {
-            const getRowClass = (idx) => {
-                if (idx === 4 || idx === 9) return 'bg-yellow-100 font-bold'; // Difference rows
-                if (idx === 10) return 'bg-red-100 font-extrabold text-red-700'; // Overall Variance
-                if (idx === 3 || idx === 8) return 'bg-gray-100 font-semibold'; // Total Consolidated
-                return 'bg-white';
+                // Helper to map and prepare data
+                const prepareData = (data, uniqueCol, amountCol, category) => {
+                    const map = new Map();
+                    data.forEach(row => {
+                        const compositeID = generateCompositeID(row, uniqueCol, amountCol);
+                        const amount = (typeof row[amountCol] === 'number' ? row[amountCol] : parseFloat(String(row[amountCol]).replace(/[^0-9.-]/g, '')) || 0);
+
+                        if (!map.has(compositeID)) {
+                            map.set(compositeID, {
+                                compositeID,
+                                amount: parseFloat(amount.toFixed(2)),
+                                count: 0,
+                                source: category,
+                                records: []
+                            });
+                        }
+                        
+                        const entry = map.get(compositeID);
+                        entry.count++;
+                        entry.records.push({
+                            ...row,
+                            [`${category}_Amount`]: parseFloat(amount.toFixed(2)),
+                            [`${category}_Unique_ID`]: row[uniqueCol],
+                            '__Composite_ID': compositeID,
+                            '__Appearance_Count': entry.count,
+                        });
+                    });
+                    return Array.from(map.values());
+                };
+                
+                const preparedA = prepareData(allAData, uniqueIdA, amountA, 'A');
+                const preparedB = prepareData(allBData, uniqueIdB, amountB, 'B');
+
+                // 2. Perform Reconciliation
+                let matched = [];
+                let unmatchedA = [];
+                let unmatchedB = [];
+                
+                const bMap = new Map(preparedB.map(item => [item.compositeID, item]));
+
+                preparedA.forEach(aItem => {
+                    const bItem = bMap.get(aItem.compositeID);
+
+                    if (bItem) {
+                        // Match Found
+                        
+                        // Handle the case where the composite ID appeared multiple times in both
+                        const minCount = Math.min(aItem.count, bItem.count);
+                        const maxCount = Math.max(aItem.count, bItem.count);
+                        
+                        // Combine records up to the minimum count
+                        for (let i = 0; i < minCount; i++) {
+                             // Combine the current records from A and B
+                            const aRecord = aItem.records[i];
+                            const bRecord = bItem.records[i];
+                            matched.push({
+                                // Metadata for download report
+                                '__Match_Status': 'MATCHED',
+                                '__Source_File_A': aRecord['__Source_File'],
+                                '__Source_File_B': bRecord['__Source_File'],
+                                '__Original_Row_Index_A': aRecord['__Original_Row_Index'],
+                                '__Original_Row_Index_B': bRecord['__Original_Row_Index'],
+                                
+                                // User Data Fields
+                                'Composite_ID': aItem.compositeID,
+                                'Amount': aItem.amount,
+                                'Unique_ID_A': aRecord[`A_Unique_ID`],
+                                'Amount_A': aRecord[`A_Amount`],
+                                'Unique_ID_B': bRecord[`B_Unique_ID`],
+                                'Amount_B': bRecord[`B_Amount`],
+                                'Difference': aItem.amount - bItem.amount, // Should be 0
+                                
+                                // Merge all other original fields from both records (prefixed)
+                                ...Object.entries(aRecord)
+                                    .filter(([key]) => !key.startsWith('__') && key !== uniqueIdA && key !== amountA)
+                                    .reduce((acc, [key, value]) => ({...acc, [`A_${key}`]: value}), {}),
+                                ...Object.entries(bRecord)
+                                    .filter(([key]) => !key.startsWith('__') && key !== uniqueIdB && key !== amountB)
+                                    .reduce((acc, [key, value]) => ({...acc, [`B_${key}`]: value}), {}),
+
+                            });
+                        }
+                        
+                        // Handle leftovers (Partial Match, but records still unmatched)
+                        if (aItem.count > minCount) {
+                            for (let i = minCount; i < aItem.count; i++) {
+                                const aRecord = aItem.records[i];
+                                unmatchedA.push({
+                                    ...aRecord,
+                                    '__Match_Status': 'UNMATCHED_LEFTOVER',
+                                    'Composite_ID': aItem.compositeID,
+                                    'Amount': aItem.amount,
+                                });
+                            }
+                        }
+                        if (bItem.count > minCount) {
+                            for (let i = minCount; i < bItem.count; i++) {
+                                const bRecord = bItem.records[i];
+                                unmatchedB.push({
+                                    ...bRecord,
+                                    '__Match_Status': 'UNMATCHED_LEFTOVER',
+                                    'Composite_ID': bItem.compositeID,
+                                    'Amount': bItem.amount,
+                                });
+                            }
+                        }
+                        
+                        // Remove from B map so it's not checked again
+                        bMap.delete(aItem.compositeID); 
+
+                    } else {
+                        // No Match found in B for this Composite ID (Category A Only)
+                        unmatchedA = unmatchedA.concat(aItem.records.map(r => ({
+                            ...r,
+                            '__Match_Status': 'UNMATCHED_A_ONLY',
+                            'Composite_ID': aItem.compositeID,
+                            'Amount': aItem.amount,
+                        })));
+                    }
+                });
+
+                // All remaining items in bMap are Category B Only
+                bMap.forEach(bItem => {
+                    unmatchedB = unmatchedB.concat(bItem.records.map(r => ({
+                        ...r,
+                        '__Match_Status': 'UNMATCHED_B_ONLY',
+                        'Composite_ID': bItem.compositeID,
+                        'Amount': bItem.amount,
+                    })));
+                });
+                
+                // --- GENERATE SUMMARY ---
+                const totalA = preparedA.reduce((sum, item) => sum + item.amount * item.count, 0);
+                const countA = preparedA.reduce((sum, item) => sum + item.count, 0);
+                const totalB = preparedB.reduce((sum, item) => sum + item.amount * item.count, 0);
+                const countB = preparedB.reduce((sum, item) => sum + item.count, 0);
+
+                const matchedCount = matched.length;
+                const matchedAmount = matched.reduce((sum, item) => sum + item.Amount, 0);
+                const unmatchedACount = unmatchedA.length;
+                const unmatchedAAmount = unmatchedA.reduce((sum, item) => sum + item.Amount, 0);
+                const unmatchedBCount = unmatchedB.length;
+                const unmatchedBAmount = unmatchedB.reduce((sum, item) => sum + item.Amount, 0);
+                
+                const overallStatus = (countA === matchedCount && countB === matchedCount) ? 'Perfect Match' : 
+                                      (matchedCount > 0 && (unmatchedACount > 0 || unmatchedBCount > 0)) ? 'Partial Match' : 
+                                      (matchedCount === 0) ? 'No Match' : 'Perfect Match';
+
+
+                const summaryMetricsA = [
+                    { key: 'totalA', label: 'Total Records Uploaded', value: countA, format: 'count' },
+                    { key: 'totalAmountA', label: 'Total Amount (A)', value: totalA, format: 'currency' },
+                    { key: 'matchedA', label: 'Matched Records (Count)', value: matchedCount, format: 'count' },
+                    { key: 'matchedAmountA', label: 'Matched Amount', value: matchedAmount, format: 'currency' },
+                    { key: 'unmatchedA', label: 'Unmatched Records (A Only)', value: unmatchedACount, format: 'count' },
+                    { key: 'unmatchedAmountA', label: 'Unmatched Amount (A Only)', value: unmatchedAAmount, format: 'currency' },
+                ];
+
+                const summaryMetricsB = [
+                    { key: 'totalB', label: 'Total Records Uploaded', value: countB, format: 'count' },
+                    { key: 'totalAmountB', label: 'Total Amount (B)', value: totalB, format: 'currency' },
+                    { key: 'matchedB', label: 'Matched Records (Count)', value: matchedCount, format: 'count' },
+                    { key: 'matchedAmountB', label: 'Matched Amount', value: matchedAmount, format: 'currency' },
+                    { key: 'unmatchedB', label: 'Unmatched Records (B Only)', value: unmatchedBCount, format: 'count' },
+                    { key: 'unmatchedAmountB', label: 'Unmatched Amount (B Only)', value: unmatchedBAmount, format: 'currency' },
+                ];
+
+
+                setResults({
+                    overallStatus,
+                    matched: matched,
+                    unmatchedA: unmatchedA,
+                    unmatchedB: unmatchedB,
+                    summaryMetricsA,
+                    summaryMetricsB,
+                });
+                setStep(3); // Move to results step
+
+            } catch (err) {
+                console.error("Reconciliation Error:", err);
+                setError(`A critical error occurred during reconciliation: ${err.message}. Please check your files and column names.`);
+            } finally {
+                setProcessing(false);
+            }
+        }, [columnConfig, categoryAFiles, categoryBFiles]);
+
+        const downloadReport = useCallback(() => {
+            const wb = XLSX.utils.book_new();
+            const dateStr = new Date().toISOString().slice(0, 10);
+            
+            const reportsToGenerate = {
+                'summary': { 
+                    sheetName: 'Summary', 
+                    data: [
+                        ...results.summaryMetricsA.map(m => ({
+                            Category: `A - ${m.label}`,
+                            Count: m.format === 'count' ? m.value : null,
+                            Amount: m.format === 'currency' ? m.value : null,
+                        })),
+                        ...results.summaryMetricsB.map(m => ({
+                            Category: `B - ${m.label}`,
+                            Count: m.format === 'count' ? m.value : null,
+                            Amount: m.format === 'currency' ? m.value : null,
+                        })),
+                        { Category: 'Overall Status', Count: null, Amount: results.overallStatus }
+                    ], 
+                    active: selectedDownloads.includes('summary') 
+                },
+                'matched': { 
+                    sheetName: 'Matched Records', 
+                    data: results.matched, 
+                    active: selectedDownloads.includes('matched') 
+                },
+                'unmatchedA': { 
+                    sheetName: 'Unmatched A', 
+                    data: results.unmatchedA, 
+                    active: selectedDownloads.includes('unmatchedA') 
+                },
+                'unmatchedB': { 
+                    sheetName: 'Unmatched B', 
+                    data: results.unmatchedB, 
+                    active: selectedDownloads.includes('unmatchedB') 
+                },
             };
 
-            return (
-                <div className="overflow-x-auto rounded-xl shadow-lg border border-gray-200">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Metric</th>
-                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Count</th>
-                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount (USD)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                            {summary.map((row, idx) => (
-                                <tr key={idx} className={`${getRowClass(idx)}`}>
-                                    <td className="py-2 px-4 text-sm font-medium text-gray-800">{row.Category}</td>
-                                    <td className="text-right py-2 px-4 text-sm text-gray-700">{row.Count.toLocaleString()}</td>
-                                    <td className="text-right py-2 px-4 text-sm text-gray-700">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            );
-        };
+            Object.entries(reportsToGenerate).forEach(([key, report]) => {
+                if (report.active) {
+                    const ws = XLSX.utils.json_to_sheet(report.data);
+                    XLSX.utils.book_append_sheet(wb, ws, report.sheetName);
+                }
+            });
+
+            if (wb.SheetNames.length === 0) {
+                 setError("Please select at least one report type to download.");
+                 return;
+            }
+
+            XLSX.writeFile(wb, `Reconciliation_Report_${dateStr}.xlsx`);
+        }, [results, selectedDownloads]);
+
+
+        // --- UI RENDER LOGIC ---
+
+        const isConfigValid = useMemo(() => {
+            const { uniqueIdA, uniqueIdB, amountA, amountB } = columnConfig;
+            return uniqueIdA && uniqueIdB && amountA && amountB && categoryAFiles.length > 0 && categoryBFiles.length > 0;
+        }, [columnConfig, categoryAFiles, categoryBFiles]);
 
         return (
-            <div className="min-h-screen bg-gray-50 py-10 px-4 sm:px-6 lg:px-8 font-sans">
-                <div className="max-w-7xl mx-auto">
+            <div className="p-4 sm:p-8 max-w-6xl mx-auto">
+                <header className="text-center mb-10">
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-800">
+                        Advanced Transaction Reconciliation
+                    </h1>
+                    <p className="text-lg text-gray-500 mt-2">
+                        Match records across two categories based on a Composite ID (Unique Ref + Amount).
+                    </p>
+                </header>
+
+                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl border border-gray-100">
                     
-                    {/* Header */}
-                    <div className="text-center mb-12">
-                        <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl rounded-xl shadow-md p-4 bg-white border border-blue-100">
-                            Reconciliation Engine (Binary String Header Fix)
-                        </h1>
-                        <p className="mt-3 text-xl text-gray-500">
-                            Attempting low-level file read fix for corrupted/large files.
-                        </p>
+                    {/* Step Indicators */}
+                    <div className="flex justify-between items-center mb-8 relative">
+                        {[1, 2, 3].map((s) => (
+                            <React.Fragment key={s}>
+                                <div className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-bold text-white transition-all duration-300 ${step >= s ? 'bg-indigo-600' : 'bg-gray-300'}`}>
+                                    {s}
+                                </div>
+                                {s < 3 && (
+                                    <div className={`flex-1 h-1 mx-2 transition-all duration-300 ${step > s ? 'bg-indigo-600' : 'bg-gray-300'}`}></div>
+                                )}
+                            </React.Fragment>
+                        ))}
+                        <div className="absolute top-1/2 left-0 right-0 h-1 bg-gray-300 transform -translate-y-1/2 -z-0"></div>
+                    </div>
+                    <div className="flex justify-between text-sm sm:text-base mb-10 text-gray-600 font-medium">
+                        <span className={step === 1 ? 'text-indigo-600 font-semibold' : ''}>1. Upload Files</span>
+                        <span className={step === 2 ? 'text-indigo-600 font-semibold' : ''}>2. Configure Columns</span>
+                        <span className={step === 3 ? 'text-indigo-600 font-semibold' : ''}>3. Results & Download</span>
                     </div>
 
-                    <ProgressStepper step={step} />
 
-                    {/* Error Alert */}
+                    {/* Error Message Display */}
                     {error && (
-                        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg shadow-md flex items-center" role="alert">
-                            <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
-                            <div className="flex flex-col">
-                                <p className="font-semibold mr-2">File Reading Error:</p>
-                                <p className="text-sm break-all">{error}</p>
+                        <div className="p-4 mb-6 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-start">
+                            <AlertCircle size={20} className="mt-0.5 mr-3 flex-shrink-0" />
+                            <div className="text-sm">
+                                <h4 className="font-bold">Operation Failed</h4>
+                                <p>{error}</p>
                             </div>
-                            <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-800 p-1">
-                                <X className="w-4 h-4" />
-                            </button>
+                            <button onClick={() => setError(null)} className="ml-auto p-1 rounded-full text-red-500 hover:bg-red-200 transition"><X size={16} /></button>
                         </div>
                     )}
 
-                    {/* STEP 1: UPLOAD AND CONFIG */}
+                    {/* STEP 1: Upload Files */}
                     {step === 1 && (
-                        <div>
+                        <div className="space-y-8">
                             <div className="grid md:grid-cols-2 gap-8">
-                                <FileUploadSection 
-                                    category="A" 
-                                    files={categoryAFiles} 
-                                    availableColumns={availableColumnsA} 
-                                    columnConfig={columnConfig}
-                                    setColumnConfig={setColumnConfig}
-                                />
-                                <FileUploadSection 
-                                    category="B" 
-                                    files={categoryBFiles} 
-                                    availableColumns={availableColumnsB} 
-                                    columnConfig={columnConfig}
-                                    setColumnConfig={setColumnConfig}
-                                />
-                            </div>
+                                {/* Category A Upload (e.g., GL Statement) */}
+                                <div className="bg-gray-50 p-6 rounded-xl border border-dashed border-gray-300">
+                                    <h3 className="text-xl font-semibold text-gray-700 mb-4 flex items-center">
+                                        Category A: GL Statement / Core System Records
+                                    </h3>
+                                    <label className="block w-full text-center py-4 px-4 border-2 border-indigo-400 border-dashed rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                                        <Upload size={24} className="text-indigo-600 mx-auto mb-2" />
+                                        <span className="text-indigo-600 font-medium">Select Excel Files (.xlsx)</span>
+                                        <input type="file" multiple accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'A')} />
+                                    </label>
+                                    <p className="text-sm text-gray-500 mt-2">Selected Files: {categoryAFiles.length}</p>
+                                    <div className="mt-4">
+                                        <FileList files={categoryAFiles} onRemove={(idx) => handleRemoveFile(idx, 'A')} />
+                                    </div>
+                                </div>
 
-                            <div className="flex justify-center mt-10">
-                                <button
-                                    onClick={handleConfigSubmit}
-                                    disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || !columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB || availableColumnsA.length === 0 || availableColumnsB.length === 0}
-                                    className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-xl disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                {/* Category B Upload (e.g., Settlement Report) */}
+                                <div className="bg-gray-50 p-6 rounded-xl border border-dashed border-gray-300">
+                                    <h3 className="text-xl font-semibold text-gray-700 mb-4 flex items-center">
+                                        Category B: Settlement / External System Report
+                                    </h3>
+                                    <label className="block w-full text-center py-4 px-4 border-2 border-indigo-400 border-dashed rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                                        <Upload size={24} className="text-indigo-600 mx-auto mb-2" />
+                                        <span className="text-indigo-600 font-medium">Select Excel Files (.xlsx)</span>
+                                        <input type="file" multiple accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(e, 'B')} />
+                                    </label>
+                                    <p className="text-sm text-gray-500 mt-2">Selected Files: {categoryBFiles.length}</p>
+                                    <div className="mt-4">
+                                        <FileList files={categoryBFiles} onRemove={(idx) => handleRemoveFile(idx, 'B')} />
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="text-center pt-4">
+                                <button 
+                                    onClick={() => setStep(2)} 
+                                    disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0}
+                                    className="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    Proceed to Reconciliation (Step 2)
+                                    Proceed to Column Configuration
                                 </button>
                             </div>
                         </div>
                     )}
 
-                    {/* STEP 2: PROCESSING */}
+                    {/* STEP 2: Configure Columns */}
                     {step === 2 && (
-                        <div className="max-w-2xl mx-auto p-8 bg-white rounded-xl shadow-2xl border border-blue-100">
-                            <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
-                                {processing ? 'Processing Data in Background Worker...' : 'Reconciliation Setup Complete'}
-                            </h2>
+                        <div className="space-y-8">
+                            <p className="text-gray-600 text-center mb-6">
+                                Select the Unique ID and Amount columns from your uploaded files.
+                                The **Composite ID** will be generated by combining **Unique ID + Rounded Amount** for precise matching.
+                            </p>
                             
-                            {processing ? (
-                                <div>
-                                    <p className="text-center text-gray-600 mb-6 font-medium">
-                                        <span className="animate-pulse mr-2">⚙️</span> {statusMessage}
-                                    </p>
+                            <div className="grid md:grid-cols-2 gap-8">
+                                {/* Category A Configuration */}
+                                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 space-y-4">
+                                    <h3 className="text-xl font-semibold text-gray-700 mb-4">Category A Columns</h3>
                                     
-                                    <div className="space-y-4">
-                                        {/* Progress Bar A */}
-                                        <div>
-                                            <div className="flex justify-between mb-1">
-                                                <span className="text-sm font-medium text-indigo-600">Category A Consolidation</span>
-                                                <span className="text-sm font-medium text-indigo-600">{progressA}%</span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                                <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progressA}%` }}></div>
-                                            </div>
-                                        </div>
+                                    <label className="block">
+                                        <span className="text-gray-700 font-medium">Unique Identifier Column (A):</span>
+                                        <select
+                                            value={columnConfig.uniqueIdA}
+                                            onChange={(e) => setColumnConfig(prev => ({ ...prev, uniqueIdA: e.target.value }))}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-white text-gray-800"
+                                            disabled={availableColumnsA.length === 0}
+                                        >
+                                            <option value="">-- Select Unique ID Column --</option>
+                                            {availableColumnsA.map(col => <option key={col} value={col}>{col}</option>)}
+                                        </select>
+                                    </label>
+                                    
+                                    <label className="block">
+                                        <span className="text-gray-700 font-medium">Amount Column (A):</span>
+                                        <select
+                                            value={columnConfig.amountA}
+                                            onChange={(e) => setColumnConfig(prev => ({ ...prev, amountA: e.target.value }))}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-white text-gray-800"
+                                            disabled={availableColumnsA.length === 0}
+                                        >
+                                            <option value="">-- Select Amount Column --</option>
+                                            {availableColumnsA.map(col => <option key={col} value={col}>{col}</option>)}
+                                        </select>
+                                    </label>
+                                    {availableColumnsA.length === 0 && <p className="text-red-500 text-sm">Upload a file to load columns.</p>}
+                                </div>
 
-                                        {/* Progress Bar B */}
-                                        <div>
-                                            <div className="flex justify-between mb-1">
-                                                <span className="text-sm font-medium text-red-600">Category B Consolidation</span>
-                                                <span className="text-sm font-medium text-red-600">{progressB}%</span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                                <div className="bg-red-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progressB}%` }}></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="mt-8 text-center text-sm text-gray-500">
-                                        Processing large files may take a few minutes. This work is done off the main thread to prevent the browser from freezing.
-                                    </div>
+                                {/* Category B Configuration */}
+                                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 space-y-4">
+                                    <h3 className="text-xl font-semibold text-gray-700 mb-4">Category B Columns</h3>
+                                    
+                                    <label className="block">
+                                        <span className="text-gray-700 font-medium">Unique Identifier Column (B):</span>
+                                        <select
+                                            value={columnConfig.uniqueIdB}
+                                            onChange={(e) => setColumnConfig(prev => ({ ...prev, uniqueIdB: e.target.value }))}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-white text-gray-800"
+                                            disabled={availableColumnsB.length === 0}
+                                        >
+                                            <option value="">-- Select Unique ID Column --</option>
+                                            {availableColumnsB.map(col => <option key={col} value={col}>{col}</option>)}
+                                        </select>
+                                    </label>
+                                    
+                                    <label className="block">
+                                        <span className="text-gray-700 font-medium">Amount Column (B):</span>
+                                        <select
+                                            value={columnConfig.amountB}
+                                            onChange={(e) => setColumnConfig(prev => ({ ...prev, amountB: e.target.value }))}
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 bg-white text-gray-800"
+                                            disabled={availableColumnsB.length === 0}
+                                        >
+                                            <option value="">-- Select Amount Column --</option>
+                                            {availableColumnsB.map(col => <option key={col} value={col}>{col}</option>)}
+                                        </select>
+                                    </label>
+                                    {availableColumnsB.length === 0 && <p className="text-red-500 text-sm">Upload a file to load columns.</p>}
                                 </div>
-                            ) : (
-                                <div className="text-center">
-                                    <p className="text-gray-600 mb-6">
-                                        Files and column mappings are ready. Click below to begin the reconciliation process.
-                                    </p>
-                                    <button
-                                        onClick={startReconciliation}
-                                        className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-green-600 hover:bg-green-700 transition duration-150 shadow-xl"
-                                    >
-                                        Click to Start Reconciliation
-                                    </button>
-                                </div>
-                            )}
+                            </div>
+                            
+                            <div className="flex justify-center space-x-4 pt-4">
+                                <button 
+                                    onClick={() => setStep(1)} 
+                                    className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
+                                >
+                                    ← Back to Upload
+                                </button>
+                                <button 
+                                    onClick={reconcileData} 
+                                    disabled={!isConfigValid || processing}
+                                    className="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                >
+                                    {processing ? (
+                                        <>
+                                            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Processing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Reconcile & View Results
+                                            <CheckCircle size={20} className="ml-2" color="white" />
+                                        </>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     )}
 
-                    {/* STEP 3: RESULTS */}
+                    {/* STEP 3: Results */}
                     {step === 3 && results && (
                         <div className="space-y-8">
-                            <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded-lg shadow-md flex items-center justify-between" role="alert">
-                                <div className="flex items-center">
-                                    <CheckCircle className="w-5 h-5 mr-3" />
-                                    <p className="font-semibold text-lg">Reconciliation Complete!</p>
+                            
+                            <div className={`p-6 rounded-xl text-center shadow-lg ${results.overallStatus === 'Perfect Match' ? 'bg-green-100 border-green-500' : results.overallStatus === 'Partial Match' ? 'bg-yellow-100 border-yellow-500' : 'bg-red-100 border-red-500'}`}>
+                                <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-800">
+                                    Reconciliation Status: <span className={results.overallStatus === 'Perfect Match' ? 'text-green-700' : results.overallStatus === 'Partial Match' ? 'text-yellow-700' : 'text-red-700'}>{results.overallStatus}</span>
+                                </h2>
+                                <p className="text-lg text-gray-600">
+                                    Matched Records: <span className="font-bold text-indigo-600">{results.matched.length.toLocaleString()}</span>
+                                    {' / '}
+                                    Total A: <span className="font-bold text-gray-700">{results.summaryMetricsA[0].value.toLocaleString()}</span>
+                                    {' / '}
+                                    Total B: <span className="font-bold text-gray-700">{results.summaryMetricsB[0].value.toLocaleString()}</span>
+                                </p>
+                            </div>
+
+                            {/* Download Controls */}
+                            <div className="bg-white p-6 rounded-xl border border-gray-200">
+                                <h3 className="font-bold text-xl mb-4 text-gray-800 flex items-center">
+                                    <Download size={24} className="mr-2 text-indigo-600" />
+                                    Download Reports
+                                </h3>
+                                
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                                    {Object.entries({
+                                        summary: 'Summary',
+                                        matched: 'Matched Records',
+                                        unmatchedA: 'Unmatched A',
+                                        unmatchedB: 'Unmatched B'
+                                    }).map(([key, label]) => (
+                                        <label key={key} className="flex items-center cursor-pointer bg-gray-50 p-3 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={selectedDownloads.includes(key)}
+                                                onChange={(e) => {
+                                                    setSelectedDownloads(prev => 
+                                                        e.target.checked ? [...prev, key] : prev.filter(k => k !== key)
+                                                    );
+                                                }}
+                                                className="form-checkbox h-5 w-5 text-indigo-600 rounded border-gray-300"
+                                            />
+                                            <span className="ml-2 text-sm font-medium text-gray-700">{label}</span>
+                                        </label>
+                                    ))}
                                 </div>
+                                
                                 <button
                                     onClick={downloadReport}
-                                    className="flex items-center px-6 py-2 bg-green-600 text-white font-bold rounded-full hover:bg-green-700 transition duration-150 shadow-lg"
+                                    disabled={selectedDownloads.length === 0}
+                                    className="w-full py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                                 >
-                                    <Download className="w-5 h-5 mr-2" />
-                                    Download Full Report
+                                    <Download size={20} className="mr-2" />
+                                    Download {selectedDownloads.length} Report{selectedDownloads.length !== 1 ? 's' : ''}
                                 </button>
                             </div>
 
-                            <div className="bg-white rounded-xl shadow-2xl p-6">
-                                <h3 className="font-bold text-2xl mb-6 text-gray-800 border-b pb-3">Reconciliation Summary</h3>
-                                <SummaryTable summary={results.summary} />
+
+                            {/* Structured Summary Tables */}
+                            <div className="bg-gray-50 rounded-lg p-6">
+                                <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Structured Summary</h3>
+                                <div className="grid md:grid-cols-2 gap-6">
+                                    {/* Category A Summary */}
+                                    <SummaryTable metrics={results.summaryMetricsA} category="Category A" />
+                                    
+                                    {/* Category B Summary */}
+                                    <SummaryTable metrics={results.summaryMetricsB} category="Category B" />
+                                </div>
                             </div>
 
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <p className="text-sm text-blue-800">
-                                    <strong>Optimization Note:</strong> The report contains **six** sheets: **Summary**, **Matched Records**, **Unmatched Category A/B**, and **Consolidated A/B**. The data is optimized to include only the original ID/Amount, Composite ID, Match Serial Number, Appearance Count, and Source File for traceability.
+                                <p className="text-sm text-blue-800 flex items-start">
+                                    <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-blue-600" />
+                                    <span>
+                                        **Traceability Note:** The downloaded reports include essential metadata like **`Composite_ID`** (for the match key), **`__Source_File`**, and **`__Original_Row_Index`** (for the exact row number in the source file) to help you trace the transaction back to its origin.
+                                    </span>
                                 </p>
+                            </div>
+                            <div className="text-center pt-4">
+                                <button 
+                                    onClick={() => setStep(1)} 
+                                    className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
+                                >
+                                    Start New Reconciliation
+                                </button>
                             </div>
                         </div>
                     )}
@@ -879,6 +788,7 @@
         );
     };
     
+    // Render the React application
     const container = document.getElementById('root');
     const root = ReactDOM.createRoot(container);
     root.render(<ReconciliationApp />);
