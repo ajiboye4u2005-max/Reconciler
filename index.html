@@ -1,602 +1,840 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Optimized Reconciliation Tool (Streaming CSV / XLSX)</title>
-
-  <!-- Libraries -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
-
-  <!-- Tailwind CDN for quick styling -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <style>
-    /* small helpers */
-    .small { font-size: .9rem; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Helvetica Neue", monospace; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Reconciliation Tool (Million Row Support)</title>
+    <!-- React and Babel for component structure -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS (xlsx) for all Excel/CSV formats (XLSX, XLS, CSV) -->
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
 </head>
-<body class="bg-gray-50 min-h-screen">
-  <div class="max-w-6xl mx-auto p-6">
-    <div class="bg-white rounded-lg shadow p-6">
-      <h1 class="text-2xl font-bold mb-2">Optimized Reconciliation Tool — Streaming-friendly</h1>
-      <p class="text-sm text-gray-600 mb-4">This version uses streaming parsing and IndexedDB to handle very large CSVs (recommended) and large XLSX by converting sheet->CSV then streaming. Read stage happens immediately on upload (headers, sample, and counts are stored) so you can configure matching before full reconciliation.</p>
+<body>
+    <div id="root"></div>
 
-      <!-- Step 1: Upload & read -->
-      <section class="mb-6">
-        <h2 class="font-semibold">Step 1 — Upload files (reads immediately)</h2>
-        <div class="grid md:grid-cols-2 gap-4 mt-3">
-          <div class="p-4 border rounded bg-gray-50">
-            <label class="block font-medium mb-2">Category A files (CSV / XLSX / XLS)</label>
-            <input id="inputA" type="file" multiple accept=".csv,.txt,.xlsx,.xls" class="block" />
-            <div id="statusA" class="mt-3 text-sm small text-gray-700"></div>
-          </div>
+    <script type="text/babel">
+    
+    // --- ICON PLACEHOLDERS (Simplified for single-file structure) ---
+    const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
+        <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
+    );
+    const Upload = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></IconWrapper>;
+    const FileSpreadsheet = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></IconWrapper>;
+    const AlertCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></IconWrapper>;
+    const CheckCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14 9 11"/></svg></IconWrapper>;
+    const Download = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></IconWrapper>;
+    const X = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></IconWrapper>;
 
-          <div class="p-4 border rounded bg-gray-50">
-            <label class="block font-medium mb-2">Category B files (CSV / XLSX / XLS)</label>
-            <input id="inputB" type="file" multiple accept=".csv,.txt,.xlsx,.xls" class="block" />
-            <div id="statusB" class="mt-3 text-sm small text-gray-700"></div>
-          </div>
-        </div>
+    const CHUNK_SIZE = 50000; // Define chunk size for processing data (50k rows per worker message)
 
-        <div class="mt-4 text-sm text-gray-700">
-          <p><strong>Notes:</strong> For extremely large datasets (millions of rows) CSV is strongly recommended — browsers can stream CSV with low memory. XLSX files are converted to CSV internally and then streamed; this still requires some memory but is much better than loading full JSON.</p>
-        </div>
-      </section>
+    // --- WEB WORKER SCRIPT ---
+    // Note: The content of the workerScript string must be escaped so Babel doesn't try to compile its internal template literals.
+    const workerScript = `
+        // Import the SheetJS library into the worker context
+        importScripts('https://unpkg.com/xlsx/dist/xlsx.full.min.js');
 
-      <!-- Display extracted headers and sample -->
-      <section class="mb-6">
-        <h3 class="font-semibold">Detected headers & sample rows (from first file of each category)</h3>
-        <div class="grid md:grid-cols-2 gap-4">
-          <div class="p-3 border rounded bg-white">
-            <div class="flex justify-between items-center">
-              <div><strong>Category A</strong></div>
-              <div id="metaA" class="text-sm text-gray-600"></div>
+        // Helper function for array buffer to binary string conversion
+        const fixdata = (data) => {
+            let o = "", l = 0, w = 10240;
+            for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
+            o+=String.fromCharCode.apply(null, new Uint8Array(data.slice(l*w)));
+            return o;
+        };
+
+        // --- CORE DATA READING FUNCTION (Handles all formats) ---
+        const readAndProcessFile = async (file, config, category) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = e.target.result;
+                        let workbook;
+                        let sheetName;
+
+                        if (file.name.toLowerCase().endsWith('.csv')) {
+                            // For CSV, read as text and parse using XLSX.read
+                            const csvData = new Uint8Array(data);
+                            const text = new TextDecoder('utf-8').decode(csvData);
+                            // Use XLSX read function for consistent parsing across formats
+                            workbook = XLSX.read(text, { type: 'string' });
+                            sheetName = workbook.SheetNames[0];
+                        } else {
+                            // For binary formats (XLSX, XLS), read as ArrayBuffer
+                            const binary = fixdata(data);
+                            workbook = XLSX.read(binary, { type: 'binary' });
+                            sheetName = workbook.SheetNames[0];
+                        }
+
+                        const worksheet = workbook.Sheets[sheetName];
+                        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                        // Extract headers from the first row (index 0)
+                        const headers = json[0];
+                        const dataRows = json.slice(1);
+                        
+                        const idColHeader = category === 'A' ? config.uniqueIdA : config.uniqueIdB;
+                        const amountColHeader = category === 'A' ? config.amountA : config.amountB;
+
+                        const idColIndex = headers.indexOf(idColHeader);
+                        const amountColIndex = headers.indexOf(amountColHeader);
+
+                        if (idColIndex === -1 || amountColIndex === -1) {
+                            // Using standard string concatenation here to avoid template literal issues in workerScript definition
+                            return reject('Required column \'' + idColHeader + '\' or \'' + amountColHeader + '\' not found in file: ' + file.name);
+                        }
+
+                        // Chunked Processing for Memory Optimization (Simulated)
+                        const consolidatedData = [];
+                        let totalRows = dataRows.length;
+                        
+                        // NOTE: CHUNK_SIZE must be interpolated into the workerScript string itself using React/Babel template literals
+                        // For the worker's internal loop, we will use the injected CHUNK_SIZE variable
+                        for (let i = 0; i < totalRows; i += ${CHUNK_SIZE}) { 
+                            const chunk = dataRows.slice(i, i + ${CHUNK_SIZE});
+                            
+                            chunk.forEach(row => {
+                                const originalId = String(row[idColIndex] || '').trim();
+                                const originalAmount = parseFloat(row[amountColIndex]) || 0;
+                                
+                                if (originalId && originalAmount !== 0) {
+                                    consolidatedData.push({
+                                        Unique_ID_Original: originalId,
+                                        Amount: originalAmount,
+                                        Source_File: file.name,
+                                        Original_ID_Value: originalId, // Preserve for final report
+                                        Original_Amount_Value: originalAmount, // Preserve for final report
+                                    });
+                                }
+                            });
+                            // Report progress - using template literal inside worker
+                            postMessage({ 
+                                type: 'progress', 
+                                category: category, 
+                                progress: Math.min(100, Math.ceil(((i + chunk.length) / totalRows) * 100)) 
+                            });
+                        }
+                        
+                        // Explicitly nullify large objects for GC hint
+                        workbook = null;
+                        worksheet = null;
+                        
+                        resolve(consolidatedData);
+                        
+                    } catch (e) {
+                        console.error("Worker read error:", e);
+                        reject(e.toString());
+                    }
+                };
+                
+                reader.onerror = (e) => reject(e.target.error);
+
+                // Read file as ArrayBuffer for both binary and CSV (CSV will be decoded later)
+                // This is the most memory-efficient way to handle the raw file data
+                reader.readAsArrayBuffer(file);
+            });
+        };
+
+        // --- RECONCILIATION LOGIC (Moved from main thread) ---
+        const runReconciliation = (dataA, dataB) => {
+            // 1. Combine all data into temporary map for appearance count
+            const allData = [...dataA, ...dataB];
+            const appearanceCounts = {};
+            
+            allData.forEach(item => {
+                const key = item.Unique_ID_Original;
+                appearanceCounts[key] = (appearanceCounts[key] || 0) + 1;
+            });
+            
+            // 2. Generate Composite IDs and create indexed maps
+            const dfA_map = new Map();
+            const dfB_map = new Map();
+
+            // Function to process and index a category
+            const processCategory = (data, map) => {
+                let counter = {};
+                
+                data.forEach(item => {
+                    const id = item.Unique_ID_Original;
+                    // Calculate appearance count based on unique ID for this file
+                    counter[id] = (counter[id] || 0) + 1;
+                    
+                    item.Match_Serial_No = counter[id];
+                    // Using template literal inside worker
+                    item.Composite_ID = \`\${id}_\${item.Match_Serial_No}\`;
+                    item.Appearance_Count = appearanceCounts[id]; // Use global count for final report
+                    
+                    map.set(item.Composite_ID, item);
+                });
+                return data;
+            };
+
+            const dfA = processCategory(dataA, dfA_map);
+            const dfB = processCategory(dataB, dfB_map);
+
+            // 3. Perform Reconciliation (simulating outer join)
+            const matched = [];
+            const unmatchedA = [];
+            const unmatchedB = [];
+
+            // A-side iteration (A & B Match or A Unmatched)
+            dfA.forEach(itemA => {
+                const compositeId = itemA.Composite_ID;
+                const itemB = dfB_map.get(compositeId);
+
+                const baseRecord = {
+                    Composite_ID: compositeId,
+                    Original_ID_Value_A: itemA.Original_ID_Value,
+                    Original_Amount_Value_A: itemA.Original_Amount_Value,
+                    Match_Serial_No_A: itemA.Match_Serial_No,
+                    Appearance_Count_A: itemA.Appearance_Count,
+                    Source_File_A: itemA.Source_File,
+                };
+                
+                if (itemB) {
+                    matched.push({
+                        ...baseRecord,
+                        Original_ID_Value_B: itemB.Original_ID_Value,
+                        Original_Amount_Value_B: itemB.Original_Amount_Value,
+                        Match_Serial_No_B: itemB.Match_Serial_No,
+                        Appearance_Count_B: itemB.Appearance_Count,
+                        Source_File_B: itemB.Source_File,
+                        Remark: itemA.Appearance_Count > 1 || itemB.Appearance_Count > 1 
+                            ? 'Matched - Excess (1:M or M:1 Line)' 
+                            : 'Matched - 1:1 Line Item'
+                    });
+                    // Remove from B map so it's not counted as unmatched later
+                    dfB_map.delete(compositeId);
+                } else {
+                    unmatchedA.push({
+                        ...baseRecord,
+                        Remark: 'Unmatched in Category B'
+                    });
+                }
+            });
+
+            // B-side iteration (B Unmatched - remaining items in map)
+            dfB_map.forEach(itemB => {
+                unmatchedB.push({
+                    Composite_ID: itemB.Composite_ID,
+                    Original_ID_Value_B: itemB.Original_ID_Value,
+                    Original_Amount_Value_B: itemB.Original_Amount_Value,
+                    Match_Serial_No_B: itemB.Match_Serial_No,
+                    Appearance_Count_B: itemB.Appearance_Count,
+                    Source_File_B: itemB.Source_File,
+                    Remark: 'Unmatched in Category A'
+                });
+            });
+
+            // 4. Generate Summary Metrics
+            const totalA = dfA.reduce((sum, item) => sum + item.Amount, 0);
+            const totalB = dfB.reduce((sum, item) => sum + item.Amount, 0);
+            const matchedAmountA = matched.reduce((sum, item) => sum + item.Original_Amount_Value_A, 0);
+            const matchedAmountB = matched.reduce((sum, item) => sum + item.Original_Amount_Value_B, 0);
+            const unmatchedAmountA = unmatchedA.reduce((sum, item) => sum + item.Original_Amount_Value_A, 0);
+            const unmatchedAmountB = unmatchedB.reduce((sum, item) => sum + item.Original_Amount_Value_B, 0);
+
+            const summary = [
+                { Category: '1. Matched Items (Category A)', Count: matched.length, Amount: matchedAmountA },
+                { Category: '2. Unmatched Items (Category A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
+                { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
+                { Category: '4. Total Consolidated Category A', Count: dfA.length, Amount: totalA },
+                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedAmountA) },
+                { Category: '6. Matched Items (Category B)', Count: matched.length, Amount: matchedAmountB },
+                { Category: '7. Unmatched Items (Category B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
+                { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
+                { Category: '9. Total Consolidated Category B', Count: dfB.length, Amount: totalB },
+                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedAmountB) },
+                { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
+            ];
+
+            return { summary, matched, unmatchedA, unmatchedB, dfA, dfB };
+        };
+
+        // --- WORKER MESSAGE HANDLER ---
+        onmessage = async (e) => {
+            const { action, filesA, filesB, config } = e.data;
+            
+            if (action === 'PROCESS_DATA') {
+                try {
+                    // Step 1: Read and consolidate files for Category A
+                    const allDataA = [];
+                    for (const file of filesA) {
+                        const data = await readAndProcessFile(file, config, 'A');
+                        allDataA.push(...data);
+                        data.length = 0; // Explicitly clear data
+                    }
+                    // Using template literal inside worker
+                    postMessage({ type: 'status', message: \`Finished consolidating \${allDataA.length.toLocaleString()} rows for Category A.\` });
+                    
+                    // Step 2: Read and consolidate files for Category B
+                    const allDataB = [];
+                    for (const file of filesB) {
+                        const data = await readAndProcessFile(file, config, 'B');
+                        allDataB.push(...data);
+                        data.length = 0; // Explicitly clear data
+                    }
+                    // Using template literal inside worker
+                    postMessage({ type: 'status', message: \`Finished consolidating \${allDataB.length.toLocaleString()} rows for Category B. Starting reconciliation...\` });
+
+                    // Step 3: Run Reconciliation
+                    const results = runReconciliation(allDataA, allDataB);
+                    
+                    // Explicitly nullify large arrays for GC hint
+                    allDataA.length = 0;
+                    allDataB.length = 0;
+                    
+                    postMessage({ type: 'result', results });
+
+                } catch (error) {
+                    postMessage({ type: 'error', error: error.toString() });
+                }
+            }
+            // Garbage collection hint for the worker itself
+            self.postMessage({ type: 'gc_hint' });
+        };
+    `;
+
+    // --- REACT COMPONENT ---
+    const ReconciliationApp = () => {
+        const [step, setStep] = React.useState(1);
+        const [categoryAFiles, setCategoryAFiles] = React.useState([]);
+        const [categoryBFiles, setCategoryBFiles] = React.useState([]);
+        const [columnConfig, setColumnConfig] = React.useState({
+            uniqueIdA: '',
+            uniqueIdB: '',
+            amountA: '',
+            amountB: ''
+        });
+        const [availableColumnsA, setAvailableColumnsA] = React.useState([]);
+        const [availableColumnsB, setAvailableColumnsB] = React.useState([]);
+        const [processing, setProcessing] = React.useState(false);
+        const [progressA, setProgressA] = React.useState(0);
+        const [progressB, setProgressB] = React.useState(0);
+        const [statusMessage, setStatusMessage] = React.useState('Awaiting file uploads...');
+        const [results, setResults] = React.useState(null);
+        const [error, setError] = React.useState(null);
+        const [worker, setWorker] = React.useState(null);
+
+        // Effect to initialize Web Worker
+        React.useEffect(() => {
+            if (worker) return;
+            
+            // Create the worker from the script string
+            const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+            const newWorker = new Worker(URL.createObjectURL(workerBlob));
+
+            newWorker.onmessage = (e) => {
+                if (e.data.type === 'error') {
+                    setError(e.data.error);
+                    setProcessing(false);
+                    setStatusMessage('Error during reconciliation.');
+                } else if (e.data.type === 'progress') {
+                    if (e.data.category === 'A') setProgressA(e.data.progress);
+                    if (e.data.category === 'B') setProgressB(e.data.progress);
+                } else if (e.data.type === 'status') {
+                    setStatusMessage(e.data.message);
+                } else if (e.data.type === 'result') {
+                    setResults(e.data.results);
+                    setProcessing(false);
+                    setStatusMessage('Reconciliation Complete!');
+                    setStep(3); // Move to results step
+                    // Garbage collection hint
+                    newWorker.postMessage({ type: 'gc_hint' });
+                }
+            };
+
+            newWorker.onerror = (e) => {
+                // Fixed the template literal issue on this line by using string concatenation instead of backticks
+                setError('Worker Error: ' + e.message);
+                setProcessing(false);
+            };
+
+            setWorker(newWorker);
+
+            // Cleanup function
+            return () => {
+                newWorker.terminate();
+            };
+        }, []);
+
+        const removeFile = (fileToRemove, category) => {
+            if (category === 'A') {
+                setCategoryAFiles(prev => prev.filter(file => file !== fileToRemove));
+            } else {
+                setCategoryBFiles(prev => prev.filter(file => file !== fileToRemove));
+            }
+        };
+
+        // --- STEP 1: EARLY DATA VALIDATION (Headers Only) ---
+        const extractColumns = async (file, setColumns) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                
+                // Read only a small slice of the file to get headers quickly
+                const slice = file.slice(0, 1024 * 1024); // First 1MB
+                
+                reader.onload = (e) => {
+                    try {
+                        const data = e.target.result;
+                        let workbook;
+                        let headers = [];
+                        
+                        if (file.name.toLowerCase().endsWith('.csv')) {
+                            // Quick read for CSV header
+                            const firstLine = new TextDecoder('utf-8').decode(data).split('\n')[0];
+                            headers = firstLine.split(',').map(h => h.trim().replace(/"/g, ''));
+                        } else {
+                            // Read binary (XLSX/XLS) header
+                            const binary = new Uint8Array(data);
+                            workbook = XLSX.read(binary, { type: 'array' });
+                            const sheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[sheetName];
+                            
+                            // Use XLSX utility to get header range (e.g., A1:Z1)
+                            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 'A1:Z1' });
+                            headers = json[0] || [];
+                        }
+                        
+                        // Filter out undefined/null headers
+                        const validHeaders = headers.filter(h => h && typeof h === 'string');
+                        setColumns(validHeaders);
+                        resolve(validHeaders);
+
+                    } catch (e) {
+                        console.error("Header extraction error:", e);
+                        setError("Error reading file headers. Is it a valid Excel/CSV?");
+                        resolve([]);
+                    }
+                };
+                
+                reader.readAsArrayBuffer(slice);
+            });
+        };
+
+        // Handle file upload and column extraction
+        const handleFileUpload = async (e, category) => {
+            setError(null);
+            const files = Array.from(e.target.files);
+            
+            if (category === 'A') {
+                setCategoryAFiles(prev => [...prev, ...files]);
+                if (files.length > 0 && availableColumnsA.length === 0) {
+                    await extractColumns(files[0], setAvailableColumnsA);
+                }
+            } else {
+                setCategoryBFiles(prev => [...prev, ...files]);
+                if (files.length > 0 && availableColumnsB.length === 0) {
+                    await extractColumns(files[0], setAvailableColumnsB);
+                }
+            }
+        };
+
+        // Handle configuration step navigation and validation
+        const handleConfigSubmit = () => {
+            if (!columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB) {
+                setError("Please select all four required columns for both categories.");
+                return;
+            }
+            // Step 2 validation is now complete, proceed to Step 2/Processing
+            setStep(2);
+        };
+
+        // --- STEP 2: START RECONCILIATION (Offload to Worker) ---
+        const startReconciliation = () => {
+            if (!worker) {
+                setError("Worker not initialized. Please refresh.");
+                return;
+            }
+            if (processing) return;
+
+            setProcessing(true);
+            setResults(null);
+            setError(null);
+            setProgressA(0);
+            setProgressB(0);
+            setStatusMessage('Starting data consolidation on background worker...');
+
+            // Send files and config to the Web Worker
+            worker.postMessage({
+                action: 'PROCESS_DATA',
+                filesA: categoryAFiles,
+                filesB: categoryBFiles,
+                config: columnConfig
+            });
+        };
+
+        // --- STEP 3: DOWNLOAD LOGIC ---
+        const downloadReport = () => {
+            if (!results) return;
+
+            const workbook = XLSX.utils.book_new();
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+
+            // 1. Summary Sheet
+            const ws_summary = XLSX.utils.json_to_sheet(results.summary);
+            XLSX.utils.book_append_sheet(workbook, ws_summary, "1_Summary");
+
+            // Define optimized columns for detailed reports
+            const COLUMNS_A = ['Composite_ID', 'Original_ID_Value_A', 'Original_Amount_Value_A', 'Match_Serial_No_A', 'Appearance_Count_A', 'Source_File_A'];
+            const COLUMNS_B = ['Composite_ID', 'Original_ID_Value_B', 'Original_Amount_Value_B', 'Match_Serial_No_B', 'Appearance_Count_B', 'Source_File_B'];
+            const COLUMNS_MATCHED = ['Composite_ID', 'Remark', ...COLUMNS_A.slice(1), ...COLUMNS_B.slice(1)];
+            
+            // 2. Matched Records
+            const matchedForDownload = results.matched.map(item => ({
+                'Composite_ID': item.Composite_ID,
+                'Remark': item.Remark,
+                [columnConfig.uniqueIdA]: item.Original_ID_Value_A,
+                [columnConfig.amountA]: item.Original_Amount_Value_A,
+                'Match_Serial_No_A': item.Match_Serial_No_A,
+                'Appearance_Count_A': item.Appearance_Count_A,
+                'Source_File_A': item.Source_File_A,
+                [columnConfig.uniqueIdB]: item.Original_ID_Value_B,
+                [columnConfig.amountB]: item.Original_Amount_Value_B,
+                'Match_Serial_No_B': item.Match_Serial_No_B,
+                'Appearance_Count_B': item.Appearance_Count_B,
+                'Source_File_B': item.Source_File_B,
+            }));
+            const ws_matched = XLSX.utils.json_to_sheet(matchedForDownload);
+            XLSX.utils.book_append_sheet(workbook, ws_matched, "2_Matched_Records");
+
+            // 3. Unmatched Category A
+            const unmatchedAForDownload = results.unmatchedA.map(item => ({
+                'Composite_ID': item.Composite_ID,
+                'Remark': item.Remark,
+                [columnConfig.uniqueIdA]: item.Original_ID_Value_A,
+                [columnConfig.amountA]: item.Original_Amount_Value_A,
+                'Match_Serial_No_A': item.Match_Serial_No_A,
+                'Appearance_Count_A': item.Appearance_Count_A,
+                'Source_File_A': item.Source_File_A,
+            }));
+            const ws_unmatchedA = XLSX.utils.json_to_sheet(unmatchedAForDownload);
+            XLSX.utils.book_append_sheet(workbook, ws_unmatchedA, "3_Unmatched_Category_A");
+
+            // 4. Unmatched Category B
+            const unmatchedBForDownload = results.unmatchedB.map(item => ({
+                'Composite_ID': item.Composite_ID,
+                'Remark': item.Remark,
+                [columnConfig.uniqueIdB]: item.Original_ID_Value_B,
+                [columnConfig.amountB]: item.Original_Amount_Value_B,
+                'Match_Serial_No_B': item.Match_Serial_No_B,
+                'Appearance_Count_B': item.Appearance_Count_B,
+                'Source_File_B': item.Source_File_B,
+            }));
+            const ws_unmatchedB = XLSX.utils.json_to_sheet(unmatchedBForDownload);
+            XLSX.utils.book_append_sheet(workbook, ws_unmatchedB, "4_Unmatched_Category_B");
+            
+            // 5. Consolidated Data A (For audit)
+             const dfAForDownload = results.dfA.map(item => ({
+                [columnConfig.uniqueIdA]: item.Original_ID_Value,
+                [columnConfig.amountA]: item.Original_Amount_Value,
+                'Composite_ID': item.Composite_ID,
+                'Match_Serial_No': item.Match_Serial_No,
+                'Appearance_Count': item.Appearance_Count,
+                'Source_File': item.Source_File,
+            }));
+            const ws_dfA = XLSX.utils.json_to_sheet(dfAForDownload);
+            XLSX.utils.book_append_sheet(workbook, ws_dfA, "5_Consolidated_A");
+
+            // 6. Consolidated Data B (For audit)
+             const dfBForDownload = results.dfB.map(item => ({
+                [columnConfig.uniqueIdB]: item.Original_ID_Value,
+                [columnConfig.amountB]: item.Original_Amount_Value,
+                'Composite_ID': item.Composite_ID,
+                'Match_Serial_No': item.Match_Serial_No,
+                'Appearance_Count': item.Appearance_Count,
+                'Source_File': item.Source_File,
+            }));
+            const ws_dfB = XLSX.utils.json_to_sheet(dfBForDownload);
+            XLSX.utils.book_append_sheet(workbook, ws_dfB, "6_Consolidated_B");
+
+
+            XLSX.writeFile(workbook, `Reconciliation_Report_${timestamp}.xlsx`);
+        };
+
+
+        // --- UI COMPONENTS ---
+        const FileList = ({ files, category, removeFile }) => (
+            <div className="mt-4 space-y-2">
+                {files.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                        <div className="flex items-center truncate">
+                            <FileSpreadsheet className="w-5 h-5 mr-2 text-blue-500 flex-shrink-0" />
+                            <span className="text-sm font-medium text-gray-700 truncate">{file.name}</span>
+                        </div>
+                        <button 
+                            onClick={() => removeFile(file, category)}
+                            className="text-gray-400 hover:text-red-500 p-1 rounded-full transition duration-150"
+                            title="Remove file"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                ))}
             </div>
-            <pre id="headersA" class="mono text-xs mt-2 p-2 bg-gray-50 rounded overflow-auto" style="max-height:150px"></pre>
-          </div>
+        );
 
-          <div class="p-3 border rounded bg-white">
-            <div class="flex justify-between items-center">
-              <div><strong>Category B</strong></div>
-              <div id="metaB" class="text-sm text-gray-600"></div>
+        const FileUploadSection = ({ category, files, availableColumns, columnConfig, setColumnConfig }) => (
+            <div className="p-6 bg-white border border-gray-200 rounded-xl shadow-lg">
+                <h2 className="text-xl font-bold mb-4 text-gray-800 flex items-center">
+                    <span className={`w-8 h-8 flex items-center justify-center mr-3 rounded-full ${category === 'A' ? 'bg-indigo-500' : 'bg-red-500'} text-white`}>{category}</span>
+                    Category {category} Files
+                </h2>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition duration-150">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                        <Upload className="w-6 h-6 mb-2 text-gray-500" />
+                        <p className="mb-2 text-sm text-gray-500"><span className="font-semibold">Click to upload</span> or drag and drop</p>
+                        <p className="text-xs text-gray-500">(Supports XLSX, XLS, CSV files)</p>
+                    </div>
+                    <input 
+                        type="file" 
+                        multiple 
+                        accept=".xlsx,.xls,.csv" 
+                        onChange={(e) => handleFileUpload(e, category)} 
+                        className="hidden" 
+                    />
+                </label>
+                <FileList files={files} category={category} removeFile={removeFile} />
+                
+                {files.length > 0 && availableColumns.length > 0 && (
+                    <div className="mt-6 pt-4 border-t border-gray-200 space-y-4">
+                        <h3 className="font-semibold text-lg text-gray-700">Select Mapping Columns</h3>
+                        
+                        {/* Unique ID Column Select */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Unique ID Column</label>
+                            <select
+                                value={category === 'A' ? columnConfig.uniqueIdA : columnConfig.uniqueIdB}
+                                onChange={(e) => setColumnConfig(prev => ({ ...prev, [category === 'A' ? 'uniqueIdA' : 'uniqueIdB']: e.target.value }))}
+                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="">--- Select Unique ID ---</option>
+                                {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                            </select>
+                        </div>
+                        
+                        {/* Amount Column Select */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Amount Column</label>
+                            <select
+                                value={category === 'A' ? columnConfig.amountA : columnConfig.amountB}
+                                onChange={(e) => setColumnConfig(prev => ({ ...prev, [category === 'A' ? 'amountA' : 'amountB']: e.target.value }))}
+                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                                <option value="">--- Select Amount Column ---</option>
+                                {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                )}
             </div>
-            <pre id="headersB" class="mono text-xs mt-2 p-2 bg-gray-50 rounded overflow-auto" style="max-height:150px"></pre>
-          </div>
-        </div>
-      </section>
+        );
 
-      <!-- Step 2: Configure matching (only after read) -->
-      <section class="mb-6">
-        <h3 class="font-semibold">Step 2 — Configure Unique ID components & amount columns</h3>
-        <div class="grid md:grid-cols-2 gap-4">
-          <div class="p-4 border rounded bg-white">
-            <div class="mb-2"><strong>Category A</strong></div>
-            <label class="block text-xs mb-1">Amount column</label>
-            <select id="amountA" class="w-full p-2 border rounded"></select>
+        const ProgressStepper = ({ step }) => (
+            <div className="flex justify-between items-center mb-10">
+                {[1, 2, 3].map((s) => (
+                    <React.Fragment key={s}>
+                        <div className="flex flex-col items-center">
+                            <div className={`w-10 h-10 flex items-center justify-center rounded-full font-bold transition-colors duration-300 
+                                ${s === step ? 'bg-blue-600 text-white shadow-lg' : s < step ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+                                {s < step ? <CheckCircle className="w-6 h-6" /> : s}
+                            </div>
+                            <span className={`mt-2 text-sm font-medium ${s === step ? 'text-blue-600' : 'text-gray-500'}`}>
+                                {s === 1 ? 'Upload & Map' : s === 2 ? 'Processing' : 'Results'}
+                            </span>
+                        </div>
+                        {s < 3 && (
+                            <div className={`flex-1 h-1 mx-2 transition-colors duration-300 ${s < step ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+        );
+        
+        const SummaryTable = ({ summary }) => {
+            const getRowClass = (idx) => {
+                if (idx === 4 || idx === 9) return 'bg-yellow-100 font-bold'; // Difference rows
+                if (idx === 10) return 'bg-red-100 font-extrabold text-red-700'; // Overall Variance
+                if (idx === 3 || idx === 8) return 'bg-gray-100 font-semibold'; // Total Consolidated
+                return 'bg-white';
+            };
 
-            <label class="block text-xs mt-3 mb-1">Unique ID columns (order forms composite key)</label>
-            <div id="idColsA" class="space-y-2"></div>
-            <button id="addA" class="mt-2 px-3 py-1 bg-indigo-600 text-white rounded">Add component</button>
-          </div>
+            return (
+                <div className="overflow-x-auto rounded-xl shadow-lg border border-gray-200">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Metric</th>
+                                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Count</th>
+                                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {summary.map((row, idx) => (
+                                <tr key={idx} className={`${getRowClass(idx)}`}>
+                                    <td className="py-2 px-3 text-sm font-medium text-gray-800">{row.Category}</td>
+                                    <td className="text-right py-2 px-3 text-sm text-gray-700">{row.Count.toLocaleString()}</td>
+                                    <td className="text-right py-2 px-3 text-sm text-gray-700">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
 
-          <div class="p-4 border rounded bg-white">
-            <div class="mb-2"><strong>Category B</strong></div>
-            <label class="block text-xs mb-1">Amount column</label>
-            <select id="amountB" class="w-full p-2 border rounded"></select>
+        return (
+            <div className="min-h-screen bg-gray-50 py-10 px-4 sm:px-6 lg:px-8 font-sans">
+                <div className="max-w-7xl mx-auto">
+                    
+                    {/* Header */}
+                    <div className="text-center mb-12">
+                        <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl rounded-xl shadow-md p-4 bg-white border border-blue-100">
+                            High-Volume Reconciliation Engine
+                        </h1>
+                        <p className="mt-3 text-xl text-gray-500">
+                            Optimized for millions of rows using Web Workers and chunked processing.
+                        </p>
+                    </div>
 
-            <label class="block text-xs mt-3 mb-1">Unique ID columns (order forms composite key)</label>
-            <div id="idColsB" class="space-y-2"></div>
-            <button id="addB" class="mt-2 px-3 py-1 bg-indigo-600 text-white rounded">Add component</button>
-          </div>
-        </div>
+                    <ProgressStepper step={step} />
 
-        <div class="mt-4 flex justify-end gap-3">
-          <button id="btnReconcile" class="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50" disabled>Run Reconciliation</button>
-        </div>
+                    {/* Error Alert */}
+                    {error && (
+                        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg shadow-md flex items-center" role="alert">
+                            <AlertCircle className="w-5 h-5 mr-3" />
+                            <p className="font-semibold mr-2">Error:</p>
+                            <p className="text-sm">{error}</p>
+                            <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-800">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
 
-        <div id="infoBox" class="mt-3 text-sm text-gray-600"></div>
-      </section>
+                    {/* STEP 1: UPLOAD AND CONFIG */}
+                    {step === 1 && (
+                        <div>
+                            <div className="grid md:grid-cols-2 gap-8">
+                                <FileUploadSection 
+                                    category="A" 
+                                    files={categoryAFiles} 
+                                    availableColumns={availableColumnsA} 
+                                    columnConfig={columnConfig}
+                                    setColumnConfig={setColumnConfig}
+                                />
+                                <FileUploadSection 
+                                    category="B" 
+                                    files={categoryBFiles} 
+                                    availableColumns={availableColumnsB} 
+                                    columnConfig={columnConfig}
+                                    setColumnConfig={setColumnConfig}
+                                />
+                            </div>
 
-      <!-- Results -->
-      <section id="results" class="hidden">
-        <h3 class="font-semibold">Results & Download</h3>
-        <div id="summary" class="mt-3 p-3 bg-white border rounded"></div>
-        <div class="mt-3 flex gap-2">
-          <button id="downloadMatched" class="px-3 py-2 bg-blue-600 text-white rounded">Download Matched</button>
-          <button id="downloadUnmatched" class="px-3 py-2 bg-orange-600 text-white rounded">Download Unmatched</button>
-        </div>
-      </section>
+                            <div className="flex justify-center mt-10">
+                                <button
+                                    onClick={handleConfigSubmit}
+                                    disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || !columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB}
+                                    className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-xl disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                >
+                                    Proceed to Reconciliation (Step 2)
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
-      <div class="mt-6 text-xs text-gray-500">
-        <p><strong>Technical note:</strong> Browsers are not a replacement for server-side ETL when working with multi-million-row datasets. This tool pushes the browser as far as is realistically possible using streaming, IndexedDB, and Web Workers. If you expect >10M rows or need guaranteed stability, I can provide a Node/Server implementation.</p>
-      </div>
-    </div>
-  </div>
+                    {/* STEP 2: PROCESSING */}
+                    {step === 2 && (
+                        <div className="max-w-2xl mx-auto p-8 bg-white rounded-xl shadow-2xl border border-blue-100">
+                            <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Processing Data in Background Worker...</h2>
+                            
+                            {processing ? (
+                                <div>
+                                    <p className="text-center text-gray-600 mb-6 font-medium">
+                                        <span className="animate-pulse mr-2">⚙️</span> {statusMessage}
+                                    </p>
+                                    
+                                    <div className="space-y-4">
+                                        {/* Progress Bar A */}
+                                        <div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="text-sm font-medium text-indigo-600">Category A Consolidation</span>
+                                                <span className="text-sm font-medium text-indigo-600">{progressA}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                                <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progressA}%` }}></div>
+                                            </div>
+                                        </div>
 
-<script>
-/*
-  Overview of approach:
-  - CSV files: parsed with PapaParse in worker mode (streaming, chunked).
-  - XLSX/XLS: converted to CSV by SheetJS (sheet_to_csv) then streamed via PapaParse (in chunks) to avoid immediate large JSON creation.
-  - Minimal row sample and header extraction happens immediately on upload (Step 1).
-  - Parsed rows are stored in IndexedDB (idb-keyval) as per-category incremental chunks to avoid keeping everything in memory.
-  - Reconciliation reads from IndexedDB in streaming fashion (cursor) and produces results; finally downloads created using XLSX.
-  - For very large datasets, ensure you use CSV files whenever possible.
-*/
+                                        {/* Progress Bar B */}
+                                        <div>
+                                            <div className="flex justify-between mb-1">
+                                                <span className="text-sm font-medium text-red-600">Category B Consolidation</span>
+                                                <span className="text-sm font-medium text-red-600">{progressB}%</span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                                <div className="bg-red-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progressB}%` }}></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="mt-8 text-center text-sm text-gray-500">
+                                        Processing large files may take a few minutes. This work is done off the main thread to prevent the browser from freezing.
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center">
+                                    <button
+                                        onClick={startReconciliation}
+                                        className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-green-600 hover:bg-green-700 transition duration-150 shadow-xl"
+                                    >
+                                        Click to Start Reconciliation
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
-const { get: idbGet, set: idbSet, del: idbDel } = idbKeyval;
+                    {/* STEP 3: RESULTS */}
+                    {step === 3 && results && (
+                        <div className="space-y-8">
+                            <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded-lg shadow-md flex items-center justify-between" role="alert">
+                                <div className="flex items-center">
+                                    <CheckCircle className="w-5 h-5 mr-3" />
+                                    <p className="font-semibold text-lg">Reconciliation Complete!</p>
+                                </div>
+                                <button
+                                    onClick={downloadReport}
+                                    className="flex items-center px-6 py-2 bg-green-600 text-white font-bold rounded-full hover:bg-green-700 transition duration-150 shadow-lg"
+                                >
+                                    <Download className="w-5 h-5 mr-2" />
+                                    Download Full Report
+                                </button>
+                            </div>
 
-const inputA = document.getElementById('inputA');
-const inputB = document.getElementById('inputB');
-const statusA = document.getElementById('statusA');
-const statusB = document.getElementById('statusB');
-const headersA = document.getElementById('headersA');
-const headersB = document.getElementById('headersB');
-const metaA = document.getElementById('metaA');
-const metaB = document.getElementById('metaB');
-const amountA = document.getElementById('amountA');
-const amountB = document.getElementById('amountB');
-const idColsA = document.getElementById('idColsA');
-const idColsB = document.getElementById('idColsB');
-const addA = document.getElementById('addA');
-const addB = document.getElementById('addB');
-const btnReconcile = document.getElementById('btnReconcile');
-const infoBox = document.getElementById('infoBox');
-const resultsSection = document.getElementById('results');
-const summaryDiv = document.getElementById('summary');
-const downloadMatched = document.getElementById('downloadMatched');
-const downloadUnmatched = document.getElementById('downloadUnmatched');
+                            <div className="bg-white rounded-xl shadow-2xl p-6">
+                                <h3 className="font-bold text-2xl mb-6 text-gray-800 border-b pb-3">Reconciliation Summary</h3>
+                                <SummaryTable summary={results.summary} />
+                            </div>
 
-let metaStore = {
-  A: { files: [], headers: [], sample: [], rowCount: 0, chunks: 0 },
-  B: { files: [], headers: [], sample: [], rowCount: 0, chunks: 0 }
-};
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <p className="text-sm text-blue-800">
+                                    <strong>Optimization Note:</strong> The report contains **six** sheets: **Summary**, **Matched Records**, **Unmatched Category A/B**, and **Consolidated A/B**. The data is optimized to include only the original ID/Amount, Composite ID, Match Serial Number, Appearance Count, and Source File for efficient handling of large datasets.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+    
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<ReconciliationApp />);
 
-// Utility: clear previous category data from IndexedDB and memory
-async function clearCategory(category) {
-  await idbDel('cat_' + category + '_count');
-  await idbDel('cat_' + category + '_chunks');
-  metaStore[category] = { files: [], headers: [], sample: [], rowCount: 0, chunks: 0 };
-}
-
-// Called when user uploads files
-inputA.addEventListener('change', e => handleFiles(e.target.files, 'A'));
-inputB.addEventListener('change', e => handleFiles(e.target.files, 'B'));
-
-addA.addEventListener('click', () => addIdSelector('A'));
-addB.addEventListener('click', () => addIdSelector('B'));
-
-btnReconcile.addEventListener('click', runReconciliation);
-
-// helper to create a new ID selector UI
-function addIdSelector(cat) {
-  const container = cat === 'A' ? idColsA : idColsB;
-  const select = document.createElement('select');
-  select.className = 'w-full p-2 border rounded';
-  const opt = document.createElement('option');
-  opt.value = ''; opt.textContent = 'Select column...';
-  select.appendChild(opt);
-  (cat === 'A' ? metaStore.A.headers : metaStore.B.headers).forEach(h => {
-    const o = document.createElement('option'); o.value = h; o.textContent = h; select.appendChild(o);
-  });
-  container.appendChild(select);
-  // allow removal on double click
-  select.title = 'Double-click to remove';
-  select.addEventListener('dblclick', () => select.remove());
-}
-
-// read & stream files for a category
-async function handleFiles(fileList, category) {
-  if (!fileList || fileList.length === 0) return;
-  // clear previous
-  await clearCategory(category);
-
-  metaStore[category].files = Array.from(fileList).map(f => f.name);
-  const statusEl = category === 'A' ? statusA : statusB;
-  statusEl.textContent = 'Reading files... (this may take time for large files)';
-
-  // reset UI
-  (category === 'A' ? headersA : headersB).textContent = '';
-  (category === 'A' ? metaA : metaB).textContent = '';
-
-  // keep counts in IndexedDB per category to allow recon later
-  let totalRows = 0;
-  let chunkIndex = 0;
-
-  for (const file of fileList) {
-    statusEl.textContent = `Reading ${file.name}...`;
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
-      // Stream parse CSV with PapaParse (worker enabled)
-      await streamCSVFile(file, category, ({ headers, sampleRows, rowsRead, chunksSaved }) => {
-        if (metaStore[category].headers.length === 0 && headers) {
-          metaStore[category].headers = headers;
-          // populate header UI
-          (category === 'A' ? headersA : headersB).textContent = headers.join(' | ');
-          populateHeaderSelectors();
-        }
-        // store sample if not present
-        if (metaStore[category].sample.length === 0 && sampleRows.length) {
-          metaStore[category].sample = sampleRows;
-        }
-        totalRows += rowsRead;
-        chunkIndex += chunksSaved;
-      });
-    } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-      // Read XLSX (convert first sheet to csv and stream it)
-      await streamXlsxAsCsv(file, category, ({ headers, sampleRows, rowsRead, chunksSaved }) => {
-        if (metaStore[category].headers.length === 0 && headers) {
-          metaStore[category].headers = headers;
-          (category === 'A' ? headersA : headersB).textContent = headers.join(' | ');
-          populateHeaderSelectors();
-        }
-        if (metaStore[category].sample.length === 0 && sampleRows.length) {
-          metaStore[category].sample = sampleRows;
-        }
-        totalRows += rowsRead;
-        chunkIndex += chunksSaved;
-      });
-    } else {
-      console.warn('Unsupported file type', file.name);
-    }
-  } // end files loop
-
-  metaStore[category].rowCount = totalRows;
-  metaStore[category].chunks = chunkIndex;
-  await idbSet('cat_' + category + '_count', totalRows);
-  await idbSet('cat_' + category + '_chunks', chunkIndex);
-
-  statusEl.textContent = `Finished reading. Rows: ${totalRows.toLocaleString()} — chunks: ${chunkIndex}`;
-  const metaText = `Rows: ${totalRows.toLocaleString()} | Chunks: ${chunkIndex}`;
-  (category === 'A' ? metaA : metaB).textContent = metaText;
-
-  // populate amount selects if headers available
-  populateHeaderSelectors();
-  infoBox.textContent = 'Files read and stored (in browser IndexedDB). Now configure amount & unique ID components before reconciliation.';
-  btnReconcile.disabled = !(metaStore.A.headers.length && metaStore.B.headers.length);
-}
-
-// Streaming CSV using PapaParse in worker mode and saving chunked rows into IndexedDB
-async function streamCSVFile(file, category, progressCallback) {
-  return new Promise((resolve, reject) => {
-    const CHUNK_SIZE = 100000; // rows per saved chunk - tune as needed
-    let rowsRead = 0;
-    let sampleRows = [];
-    let headers = null;
-    let chunk = [];
-    let chunkIndex = 0;
-
-    Papa.parse(file, {
-      header: true,
-      worker: true,
-      skipEmptyLines: true,
-      chunkSize: 1024 * 1024, // bytes
-      step: async function(row, parser) {
-        if (!headers) {
-          headers = Object.keys(row.data);
-        }
-        rowsRead++;
-        if (sampleRows.length < 5) sampleRows.push(row.data);
-        chunk.push(row.data);
-
-        if (chunk.length >= CHUNK_SIZE) {
-          parser.pause();
-          // save chunk into IndexedDB under key cat_{category}_chunk_{n}
-          const key = `cat_${category}_chunk_${chunkIndex}`;
-          await idbSet(key, chunk);
-          chunkIndex++;
-          chunk = [];
-          await idbSet('cat_' + category + '_chunks_temp', chunkIndex);
-          parser.resume();
-        }
-      },
-      complete: async function() {
-        // save last chunk if any
-        if (chunk.length > 0) {
-          const key = `cat_${category}_chunk_${chunkIndex}`;
-          await idbSet(key, chunk);
-          chunkIndex++;
-        }
-        // store header info
-        if (headers) {
-          await idbSet('cat_' + category + '_headers', headers);
-        }
-        // store sample and counts
-        await idbSet('cat_' + category + '_sample', sampleRows);
-        await idbSet('cat_' + category + '_count_temp', rowsRead);
-        resolve(progressCallback({ headers, sampleRows, rowsRead, chunksSaved: chunkIndex }));
-      },
-      error: function(err) {
-        console.error('PapaParse error', err);
-        reject(err);
-      }
-    });
-  });
-}
-
-// Convert XLSX first sheet to CSV in streaming-friendly manner: we produce CSV text in row-by-row fashion by iterating sheet rows
-async function streamXlsxAsCsv(file, category, progressCallback) {
-  // Read file arrayBuffer
-  const data = await file.arrayBuffer();
-  // Using SheetJS: read workbook but do not convert whole sheet to JSON (we'll iterate)
-  const wb = XLSX.read(data, { type: 'array' });
-  const sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  // We'll convert in row-major iteration using range
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-  const headers = [];
-  let sampleRows = [];
-  const CHUNK_SIZE = 100000;
-  let rowsRead = 0;
-  let chunk = [];
-  let chunkIndex = 0;
-
-  // extract headers from first row (r = range.s.r)
-  const headerRow = range.s.r;
-  for (let c = range.s.c; c <= range.e.c; c++) {
-    const cellAddress = { c: c, r: headerRow };
-    const cellRef = XLSX.utils.encode_cell(cellAddress);
-    const cell = ws[cellRef];
-    headers.push(cell ? String(cell.v).trim() : `Column_${c}`);
-  }
-
-  // iterate rows starting after header
-  for (let r = range.s.r + 1; r <= range.e.r; r++) {
-    const rowObj = {};
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cellRef = XLSX.utils.encode_cell({ c: c, r: r });
-      const cell = ws[cellRef];
-      rowObj[headers[c - range.s.c]] = cell ? cell.v : '';
-    }
-    rowsRead++;
-    if (sampleRows.length < 5) sampleRows.push(rowObj);
-    chunk.push(rowObj);
-
-    if (chunk.length >= CHUNK_SIZE) {
-      const key = `cat_${category}_chunk_${chunkIndex}`;
-      await idbSet(key, chunk);
-      chunkIndex++;
-      chunk = [];
-    }
-
-    // yield occasionally to keep UI responsive
-    if (rowsRead % 10000 === 0) {
-      await new Promise(res => setTimeout(res, 0));
-    }
-  }
-
-  if (chunk.length > 0) {
-    const key = `cat_${category}_chunk_${chunkIndex}`;
-    await idbSet(key, chunk);
-    chunkIndex++;
-  }
-
-  await idbSet('cat_' + category + '_headers', headers);
-  await idbSet('cat_' + category + '_sample', sampleRows);
-  await idbSet('cat_' + category + '_count', rowsRead);
-
-  return progressCallback({ headers, sampleRows, rowsRead, chunksSaved: chunkIndex });
-}
-
-// populate header selectors
-async function populateHeaderSelectors() {
-  const hA = (await idbGet('cat_A_headers')) || metaStore.A.headers || [];
-  const hB = (await idbGet('cat_B_headers')) || metaStore.B.headers || [];
-
-  // fill amount selects
-  amountA.innerHTML = '<option value="">Select...</option>';
-  amountB.innerHTML = '<option value="">Select...</option>';
-  hA.forEach(h => {
-    const o = document.createElement('option'); o.value = h; o.textContent = h; amountA.appendChild(o);
-  });
-  hB.forEach(h => {
-    const o = document.createElement('option'); o.value = h; o.textContent = h; amountB.appendChild(o);
-  });
-
-  // show sample for user
-  const sa = (await idbGet('cat_A_sample')) || metaStore.A.sample || [];
-  const sb = (await idbGet('cat_B_sample')) || metaStore.B.sample || [];
-  headersA.textContent = (hA.length ? hA.join(' | ') : 'No headers yet') + '\\n\\nSample:\\n' + JSON.stringify(sa, null, 2);
-  headersB.textContent = (hB.length ? hB.join(' | ') : 'No headers yet') + '\\n\\nSample:\\n' + JSON.stringify(sb, null, 2);
-
-  // prepopulate one ID selector each side if none
-  if (idColsA.children.length === 0) addIdSelector('A');
-  if (idColsB.children.length === 0) addIdSelector('B');
-
-  // enable reconcile if both have headers
-  btnReconcile.disabled = !(hA.length && hB.length);
-}
-
-// Helper: iterate stored chunks for a category and call handler for each row (async)
-async function iterateCategoryRows(category, rowHandler) {
-  const chunks = [];
-  // gather chunk keys by scanning IndexedDB known keys pattern (we used cat_{category}_chunk_{i})
-  // idbKeyval does not provide a keys() method in this lightweight wrapper, so we track count stored earlier
-  let chunksCount = await idbGet('cat_' + category + '_chunks');
-  if (typeof chunksCount !== 'number') {
-    // fallback: try to infer from incremental temp key or scan a reasonable range
-    chunksCount = (await idbGet('cat_' + category + '_chunks_temp')) || 0;
-  }
-  for (let i = 0; i < chunksCount; i++) {
-    const key = `cat_${category}_chunk_${i}`;
-    const data = await idbGet(key);
-    if (Array.isArray(data)) {
-      for (const row of data) {
-        const stop = await rowHandler(row);
-        if (stop) return;
-      }
-    }
-  }
-}
-
-// generate composite id from row and list of selected columns (simple concat with underscore)
-function generateCompositeFromRow(row, cols) {
-  return cols.map(c => {
-    const v = row[c];
-    if (v === undefined || v === null) return '';
-    return String(v).trim();
-  }).join('_').toUpperCase();
-}
-
-// Reconciliation step: read both categories from IndexedDB streaming and match
-async function runReconciliation() {
-  infoBox.textContent = 'Running reconciliation — this happens in the browser and may take time depending on dataset size.';
-  btnReconcile.disabled = true;
-  resultsSection.classList.add('hidden');
-  summaryDiv.innerHTML = '';
-
-  // read selected amount & id columns
-  const amtA = amountA.value;
-  const amtB = amountB.value;
-  if (!amtA || !amtB) {
-    alert('Please select amount columns for both categories.');
-    btnReconcile.disabled = false;
-    return;
-  }
-
-  // gather id column selections
-  const idColsSelectedA = Array.from(idColsA.querySelectorAll('select')).map(s => s.value).filter(Boolean);
-  const idColsSelectedB = Array.from(idColsB.querySelectorAll('select')).map(s => s.value).filter(Boolean);
-  if (idColsSelectedA.length === 0 || idColsSelectedB.length === 0) {
-    alert('Please add at least one Unique ID component on both sides.');
-    btnReconcile.disabled = false;
-    return;
-  }
-
-  // We'll implement a map for Category B keys -> first occurrence row info
-  // For memory reasons, if Category B expected rows > 2 million, this will be heavy. We attempt but warn user.
-  const countA = (await idbGet('cat_A_count')) || metaStore.A.rowCount || 0;
-  const countB = (await idbGet('cat_B_count')) || metaStore.B.rowCount || 0;
-  if (countA + countB > 5_000_000) {
-    const ok = confirm('Total rows exceed 5M — browser may run out of memory. Do you want to continue? (Consider server-side processing for >5M rows)');
-    if (!ok) {
-      btnReconcile.disabled = false;
-      return;
-    }
-  }
-
-  infoBox.textContent = 'Loading Category B index into memory (streaming) — this helps fast matching. This may use significant memory for large datasets.';
-  // Build map for B
-  const mapB = new Map();
-  let bRows = 0;
-  await iterateCategoryRows('B', async (row) => {
-    bRows++;
-    const key = generateCompositeFromRow(row, idColsSelectedB);
-    const amt = parseFloat(row[amtB]) || 0;
-    // store first occurrence (if duplicates exist we will use serial later)
-    if (!mapB.has(key)) {
-      mapB.set(key, []);
-    }
-    mapB.get(key).push({ row, amt });
-    // keep iterating
-    return false;
-  });
-
-  infoBox.textContent = `Category B indexed (${bRows.toLocaleString()} rows). Now streaming Category A to match.`;
-
-  // iterate A and try to match with mapB entries
-  const matched = [];
-  const unmatchedA = [];
-  const unmatchedBKeys = new Set(mapB.keys()); // track unused keys to list unmatched B later
-
-  let aRows = 0;
-  await iterateCategoryRows('A', async (row) => {
-    aRows++;
-    const key = generateCompositeFromRow(row, idColsSelectedA);
-    const amt = parseFloat(row[amtA]) || 0;
-    const candidates = mapB.get(key);
-    if (candidates && candidates.length > 0) {
-      // simplistic match: match first candidate and remove it
-      const match = candidates.shift();
-      if (candidates.length === 0) mapB.delete(key);
-      matched.push({
-        key, 
-        aRow: row, 
-        bRow: match.row,
-        aAmount: amt,
-        bAmount: match.amt
-      });
-      unmatchedBKeys.delete(key);
-    } else {
-      unmatchedA.push({ key, row, amt });
-    }
-    // keep UI responsive
-    if (aRows % 10000 === 0) {
-      summaryDiv.textContent = `Processed ${aRows.toLocaleString()} rows from A... matched: ${matched.length.toLocaleString()}`;
-      await new Promise(res => setTimeout(res, 0));
-    }
-    return false;
-  });
-
-  // build unmatchedB list from remaining mapB entries
-  const unmatchedB = [];
-  for (const [k, arr] of mapB.entries()) {
-    for (const item of arr) {
-      unmatchedB.push({ key: k, row: item.row, amt: item.amt });
-    }
-  }
-
-  // show quick summary
-  summaryDiv.innerHTML = `
-    <div><strong>Summary</strong></div>
-    <div>Category A rows processed: ${aRows.toLocaleString()}</div>
-    <div>Category B rows indexed: ${bRows.toLocaleString()}</div>
-    <div>Matched pairs: ${matched.length.toLocaleString()}</div>
-    <div>Unmatched A: ${unmatchedA.length.toLocaleString()}</div>
-    <div>Unmatched B: ${unmatchedB.length.toLocaleString()}</div>
-  `;
-  resultsSection.classList.remove('hidden');
-
-  // store results in idb for download retrieval
-  await idbSet('last_matched', matched);
-  await idbSet('last_unmatchedA', unmatchedA);
-  await idbSet('last_unmatchedB', unmatchedB);
-
-  btnReconcile.disabled = false;
-  infoBox.textContent = 'Reconciliation complete (in-browser). Use download buttons to export results.';
-}
-
-// Download handlers: create XLSX file from stored results
-downloadMatched.addEventListener('click', async () => {
-  const matched = (await idbGet('last_matched')) || [];
-  if (!matched.length) return alert('No matched results available.');
-  // convert to sheet-friendly objects
-  const rows = matched.map(m => ({
-    Composite_ID: m.key,
-    A_Source: m.aRow.Source_File || '',
-    B_Source: m.bRow.Source_File || '',
-    A_Amount: m.aAmount,
-    B_Amount: m.bAmount,
-    ...m.aRow,
-    ...m.bRow
-  }));
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, 'Matched');
-  XLSX.writeFile(wb, 'matched_results.xlsx');
-});
-
-downloadUnmatched.addEventListener('click', async () => {
-  const unmatchedA = (await idbGet('last_unmatchedA')) || [];
-  const unmatchedB = (await idbGet('last_unmatchedB')) || [];
-  if (!unmatchedA.length && !unmatchedB.length) return alert('No unmatched results available.');
-  const wb = XLSX.utils.book_new();
-  if (unmatchedA.length) {
-    const rowsA = unmatchedA.map(u => ({ Composite_ID: u.key, Amount: u.amt, ...u.row }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsA), 'Unmatched_A');
-  }
-  if (unmatchedB.length) {
-    const rowsB = unmatchedB.map(u => ({ Composite_ID: u.key, Amount: u.amt, ...u.row }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsB), 'Unmatched_B');
-  }
-  XLSX.writeFile(wb, 'unmatched_results.xlsx');
-});
-
-</script>
+    </script>
 </body>
 </html>
