@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Max Resilience)</title>
+    <title>Reconciliation Engine (Binary String Header Fix)</title>
     <!-- React and Babel for component structure -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -40,7 +40,7 @@
         // Import the SheetJS library into the worker context
         importScripts('https://unpkg.com/xlsx/dist/xlsx.full.min.js');
 
-        // Helper function for array buffer to binary string conversion
+        // Helper function for array buffer to binary string conversion (Used only for binary formats)
         const fixdata = (data) => {
             let o = "", l = 0, w = 10240;
             for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
@@ -48,7 +48,10 @@
             return o;
         };
 
-        // --- CORE DATA READING FUNCTION (Handles all formats) ---
+        // --- CORE DATA READING FUNCTION (Web Worker - Uses ArrayBuffer for performance) ---
+        // CRITICAL NOTE: This function reads the file as ArrayBuffer, which is the fastest way 
+        // to transfer large data to the worker, despite ArrayBuffer failing for header extraction
+        // in the main thread for specific corrupted files.
         const readAndProcessFile = async (file, config, category) => {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -64,7 +67,6 @@
 
                         if (isTextFile) {
                             // For CSV, decode the ArrayBuffer to text and then read
-                            // Note: SheetJS handles different CSV encodings better when read as a string type
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
                             workbook = XLSX.read(text, { type: 'string' });
                             sheetName = workbook.SheetNames[0];
@@ -146,7 +148,7 @@
                 
                 reader.onerror = (e) => reject(e.target.error);
 
-                // Read entire file as ArrayBuffer for the worker to handle
+                // Use ArrayBuffer for performance inside the worker
                 reader.readAsArrayBuffer(file);
             });
         };
@@ -280,14 +282,12 @@
             
             if (action === 'PROCESS_DATA') {
                 try {
-                    // Files received by the worker are File objects which can be read directly
-                    
                     // Step 1: Read and consolidate files for Category A
                     const allDataA = [];
                     for (const file of filesA) {
                         const data = await readAndProcessFile(file, config, 'A');
                         allDataA.push(...data);
-                        data.length = 0; // Explicitly clear data
+                        data.length = 0;
                     }
                     postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A. Starting Category B...' });
                     
@@ -296,14 +296,13 @@
                     for (const file of filesB) {
                         const data = await readAndProcessFile(file, config, 'B');
                         allDataB.push(...data);
-                        data.length = 0; // Explicitly clear data
+                        data.length = 0;
                     }
                     postMessage({ type: 'status', message: 'Finished consolidating ' + allDataB.length.toLocaleString() + ' rows for Category B. Starting reconciliation...' });
 
                     // Step 3: Run Reconciliation
                     const results = runReconciliation(allDataA, allDataB);
                     
-                    // Explicitly nullify large arrays for GC hint
                     allDataA.length = 0;
                     allDataB.length = 0;
                     
@@ -379,7 +378,6 @@
             if (category === 'A') {
                 const newFiles = categoryAFiles.filter(file => file !== fileToRemove);
                 setCategoryAFiles(newFiles);
-                // Re-extract headers from the first remaining file
                 if (newFiles.length > 0) {
                     extractColumns(newFiles[0], setAvailableColumnsA);
                 } else {
@@ -398,23 +396,13 @@
             }
         };
 
-        // Helper function for ArrayBuffer to Binary String conversion
-        const fixdata = (data) => {
-            let o = "", l = 0, w = 10240;
-            for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
-            o+=String.fromCharCode.apply(null, new Uint8Array(data.slice(l*w)));
-            return o;
-        };
-
-        // --- MAX RESILIENCE HEADER EXTRACTION (Reads entire file in main thread) ---
-        // This is necessary because slicing a complex/large XLSX file for headers often fails with compressed data errors.
+        // --- NEW STRATEGY: BINARY STRING HEADER EXTRACTION ---
+        // Uses readAsBinaryString to potentially bypass low-level ArrayBuffer decompression errors
         const extractColumns = async (file, setColumns) => {
             setError(null);
             return new Promise((resolve) => {
                 const reader = new FileReader();
                 
-                // CRITICAL CHANGE: Read the entire file as ArrayBuffer for reliable header extraction
-                // The main thread is blocked briefly, but this is the most reliable way to read headers from complex XLSX/corrupt files.
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
@@ -425,12 +413,11 @@
 
                         if (isTextFile) {
                             // Decode to string for CSV
-                            const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
-                            workbook = XLSX.read(text, { type: 'string' });
+                            // We assume the file is small enough for header extraction to be read in full
+                            workbook = XLSX.read(data, { type: 'string' });
                         } else {
-                            // Convert to binary string for robust XLSX reading
-                            const binary = fixdata(data);
-                            workbook = XLSX.read(binary, { type: 'binary', cellDates: true, raw: true });
+                            // CRITICAL FIX: Use the raw binary string and force SheetJS to read it as binary
+                            workbook = XLSX.read(data, { type: 'binary', cellDates: true, raw: true });
                         }
                         
                         if (!workbook || workbook.SheetNames.length === 0) {
@@ -465,7 +452,7 @@
 
                     } catch (e) {
                         console.error("Header extraction fatal error:", e);
-                        setError(`CRITICAL ERROR reading file headers. This is a low-level file structure issue. Details: ${e.message}. Please try saving the file as a plain CSV and re-uploading.`);
+                        setError(`CRITICAL ERROR reading file headers. Details: ${e.message}. This is likely due to a corrupted XLSX file structure. Please try saving the file as a plain CSV or a new XLSX file from your desktop application and re-uploading.`);
                         resolve([]);
                     }
                 };
@@ -476,8 +463,8 @@
                     resolve([]);
                 };
 
-                // Read entire file (no slicing)
-                reader.readAsArrayBuffer(file);
+                // CRITICAL CHANGE: Use readAsBinaryString() instead of readAsArrayBuffer()
+                reader.readAsBinaryString(file);
             });
         };
 
@@ -490,7 +477,6 @@
                 const newFiles = [...categoryAFiles, ...files];
                 setCategoryAFiles(newFiles);
                 if (availableColumnsA.length === 0 && newFiles.length > 0) {
-                    // Extract headers from the first file uploaded
                     await extractColumns(newFiles[0], setAvailableColumnsA);
                 }
             } else {
@@ -545,13 +531,14 @@
             const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
 
             // Helper for creating report data with dynamic column names
-            const createReportSheet = (data, prefix, uniqueIdKey, amountKey, remarkKey = 'Remark') => {
+            const createReportSheet = (data, uniqueIdKey, amountKey, remarkKey = 'Remark') => {
                 const sheetData = data.map(item => {
                     const row = {
                         'Composite_ID': item.Composite_ID,
                         [remarkKey]: item[remarkKey],
                     };
                     
+                    // Fields for Matched/Unmatched (Outer Join structure)
                     if (item.Original_ID_Value_A !== undefined) {
                         row[columnConfig.uniqueIdA] = item.Original_ID_Value_A;
                         row[columnConfig.amountA] = item.Original_Amount_Value_A;
@@ -587,25 +574,23 @@
             XLSX.utils.book_append_sheet(workbook, ws_summary, "1_Summary");
 
             // 2. Matched Records
-            const ws_matched = createReportSheet(results.matched, 'Matched');
+            const ws_matched = createReportSheet(results.matched);
             XLSX.utils.book_append_sheet(workbook, ws_matched, "2_Matched_Records");
 
             // 3. Unmatched Category A
-            const ws_unmatchedA = createReportSheet(results.unmatchedA, 'UnmatchedA', columnConfig.uniqueIdA, columnConfig.amountA, 'Remark');
+            const ws_unmatchedA = createReportSheet(results.unmatchedA, columnConfig.uniqueIdA, columnConfig.amountA, 'Remark');
             XLSX.utils.book_append_sheet(workbook, ws_unmatchedA, "3_Unmatched_Category_A");
 
             // 4. Unmatched Category B
-            const ws_unmatchedB = createReportSheet(results.unmatchedB, 'UnmatchedB', columnConfig.uniqueIdB, columnConfig.amountB, 'Remark');
+            const ws_unmatchedB = createReportSheet(results.unmatchedB, columnConfig.uniqueIdB, columnConfig.amountB, 'Remark');
             XLSX.utils.book_append_sheet(workbook, ws_unmatchedB, "4_Unmatched_Category_B");
             
-            // 5. Consolidated Data A (For audit) - Using the simple structure from worker
-            const ws_dfA = createReportSheet(results.dfA.map(item => ({...item, Original_ID_Value_A: item.Original_ID_Value, Original_Amount_Value_A: item.Original_Amount_Value})), 
-                'ConsolidatedA', columnConfig.uniqueIdA, columnConfig.amountA);
+            // 5. Consolidated Data A (For audit) - Note: Passing dummy keys for consolidated view
+            const ws_dfA = createReportSheet(results.dfA, columnConfig.uniqueIdA, columnConfig.amountA, 'Source_File');
             XLSX.utils.book_append_sheet(workbook, ws_dfA, "5_Consolidated_A");
 
             // 6. Consolidated Data B (For audit)
-            const ws_dfB = createReportSheet(results.dfB.map(item => ({...item, Original_ID_Value_B: item.Original_ID_Value, Original_Amount_Value_B: item.Original_Amount_Value})), 
-                'ConsolidatedB', columnConfig.uniqueIdB, columnConfig.amountB);
+            const ws_dfB = createReportSheet(results.dfB, columnConfig.uniqueIdB, columnConfig.amountB, 'Source_File');
             XLSX.utils.book_append_sheet(workbook, ws_dfB, "6_Consolidated_B");
 
             XLSX.writeFile(workbook, `Reconciliation_Report_${timestamp}.xlsx`);
@@ -749,10 +734,10 @@
                     {/* Header */}
                     <div className="text-center mb-12">
                         <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl rounded-xl shadow-md p-4 bg-white border border-blue-100">
-                            Max Resilience Reconciliation Engine
+                            Reconciliation Engine (Binary String Header Fix)
                         </h1>
                         <p className="mt-3 text-xl text-gray-500">
-                            Reading large, tricky files by guaranteeing full file integrity checks for headers.
+                            Attempting low-level file read fix for corrupted/large files.
                         </p>
                     </div>
 
@@ -884,7 +869,7 @@
 
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                                 <p className="text-sm text-blue-800">
-                                    <strong>Optimization Note:</strong> The report contains **six** sheets: **Summary**, **Matched Records**, **Unmatched Category A/B**, and **Consolidated A/B**. The data is optimized to include only the original ID/Amount, Composite ID, Match Serial Number, Appearance Count, and Source File for efficient handling of large datasets.
+                                    <strong>Optimization Note:</strong> The report contains **six** sheets: **Summary**, **Matched Records**, **Unmatched Category A/B**, and **Consolidated A/B**. The data is optimized to include only the original ID/Amount, Composite ID, Match Serial Number, Appearance Count, and Source File for traceability.
                                 </p>
                             </div>
                         </div>
