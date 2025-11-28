@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Resilient Header Extraction)</title>
+    <title>Advanced Reconciliation Tool (Max Resilience)</title>
     <!-- React and Babel for component structure -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -12,13 +12,16 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- SheetJS (xlsx) for all Excel/CSV formats (XLSX, XLS, CSV) -->
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        .font-sans { font-family: 'Inter', sans-serif; }
+    </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
     
-    // --- ICON PLACEHOLDERS (Simplified for single-file structure) ---
+    // --- ICON PLACEHOLDERS ---
     const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
         <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
     );
@@ -30,8 +33,6 @@
     const X = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></IconWrapper>;
 
     const CHUNK_SIZE = 50000; // Define chunk size for processing data (50k rows per worker message)
-    // Increased slice size for header reading robustness (5MB)
-    const HEADER_SLICE_SIZE = 5 * 1024 * 1024; 
 
     // --- WEB WORKER SCRIPT ---
     // This script contains the logic for reading the *entire* file and running reconciliation
@@ -51,6 +52,7 @@
         const readAndProcessFile = async (file, config, category) => {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
+                
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
@@ -58,10 +60,11 @@
                         let sheetName;
 
                         const fileNameLower = file.name.toLowerCase();
-                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt');
+                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
 
                         if (isTextFile) {
                             // For CSV, decode the ArrayBuffer to text and then read
+                            // Note: SheetJS handles different CSV encodings better when read as a string type
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
                             workbook = XLSX.read(text, { type: 'string' });
                             sheetName = workbook.SheetNames[0];
@@ -81,20 +84,23 @@
                         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                         // Extract headers from the first row (index 0)
-                        const headers = json[0];
+                        const headers = json[0] || [];
                         const dataRows = json.slice(1);
                         
                         const idColHeader = category === 'A' ? config.uniqueIdA : config.uniqueIdB;
                         const amountColHeader = category === 'A' ? config.amountA : config.amountB;
 
-                        const idColIndex = headers.indexOf(idColHeader);
-                        const amountColIndex = headers.indexOf(amountColHeader);
+                        // Ensure headers are strings for indexOf to work reliably
+                        const stringHeaders = headers.map(h => String(h).trim());
+
+                        const idColIndex = stringHeaders.indexOf(idColHeader);
+                        const amountColIndex = stringHeaders.indexOf(amountColHeader);
 
                         if (idColIndex === -1 || amountColIndex === -1) {
-                            return reject('Required column \\'' + idColHeader + '\\' or \\'' + amountColHeader + '\\' not found in file: ' + file.name);
+                            return reject(\`Required column '\${idColHeader}' or '\${amountColHeader}' not found in file: \${file.name}. Found headers: \${stringHeaders.join(', ')}\`);
                         }
 
-                        // Chunked Processing for Memory Optimization (Simulated)
+                        // Chunked Processing
                         const consolidatedData = [];
                         let totalRows = dataRows.length;
                         
@@ -104,6 +110,7 @@
                             chunk.forEach(row => {
                                 // IMPORTANT: Use String() conversion and trim to handle IDs that might be numeric or empty in the source
                                 const originalId = String(row[idColIndex] || '').trim();
+                                // Ensure amount parsing is robust, treating non-numbers as 0
                                 const originalAmount = parseFloat(row[amountColIndex]) || 0;
                                 
                                 // Only process rows with a non-empty ID and non-zero amount
@@ -117,7 +124,7 @@
                                     });
                                 }
                             });
-                            // Report progress
+                            // Report progress back to the main thread
                             postMessage({ 
                                 type: 'progress', 
                                 category: category, 
@@ -139,12 +146,12 @@
                 
                 reader.onerror = (e) => reject(e.target.error);
 
-                // Read entire file as ArrayBuffer for both binary and CSV (CSV will be decoded later)
+                // Read entire file as ArrayBuffer for the worker to handle
                 reader.readAsArrayBuffer(file);
             });
         };
 
-        // --- RECONCILIATION LOGIC (Moved from main thread) ---
+        // --- RECONCILIATION LOGIC ---
         const runReconciliation = (dataA, dataB) => {
             // 1. Combine all data into temporary map for appearance count
             const allData = [...dataA, ...dataB];
@@ -168,7 +175,7 @@
                     counter[id] = (counter[id] || 0) + 1;
                     
                     item.Match_Serial_No = counter[id];
-                    // Use simple concatenation to construct Composite_ID
+                    // Composite ID ensures uniqueness for non-1:1 matches
                     item.Composite_ID = id + '_' + item.Match_Serial_No;
                     item.Appearance_Count = appearanceCounts[id]; // Use global count for final report
                     
@@ -207,6 +214,7 @@
                         Match_Serial_No_B: itemB.Match_Serial_No,
                         Appearance_Count_B: itemB.Appearance_Count,
                         Source_File_B: itemB.Source_File,
+                        // Determine remark based on global appearance count
                         Remark: itemA.Appearance_Count > 1 || itemB.Appearance_Count > 1 
                             ? 'Matched - Excess (1:M or M:1 Line)' 
                             : 'Matched - 1:1 Line Item'
@@ -235,24 +243,31 @@
             });
 
             // 4. Generate Summary Metrics
+            // Calculate totals (Category A & B)
             const totalA = dfA.reduce((sum, item) => sum + item.Amount, 0);
             const totalB = dfB.reduce((sum, item) => sum + item.Amount, 0);
+            
+            // Calculate matched and unmatched amounts
             const matchedAmountA = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
             const matchedAmountB = matched.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
             const unmatchedAmountA = unmatchedA.reduce((sum, item) => sum + (item.Original_Amount_Value_A || 0), 0);
             const unmatchedAmountB = unmatchedB.reduce((sum, item) => sum + (item.Original_Amount_Value_B || 0), 0);
+            
+            // The sum of matched and unmatched should equal the total consolidated amount (within floating point precision)
+            const totalRecA = matchedAmountA + unmatchedAmountA;
+            const totalRecB = matchedAmountB + unmatchedAmountB;
 
             const summary = [
                 { Category: '1. Matched Items (Category A)', Count: matched.length, Amount: matchedAmountA },
                 { Category: '2. Unmatched Items (Category A)', Count: unmatchedA.length, Amount: unmatchedAmountA },
-                { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: matchedAmountA + unmatchedAmountA },
+                { Category: '3. Total Matched & Unmatched (A)', Count: matched.length + unmatchedA.length, Amount: totalRecA },
                 { Category: '4. Total Consolidated Category A', Count: dfA.length, Amount: totalA },
-                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - (matchedAmountA + unmatchedA.reduce((s,i) => s + (i.Original_Amount_Value_A || 0), 0)) },
+                { Category: '5. Category A Difference (4 minus 3)', Count: dfA.length - (matched.length + unmatchedA.length), Amount: totalA - totalRecA },
                 { Category: '6. Matched Items (Category B)', Count: matched.length, Amount: matchedAmountB },
                 { Category: '7. Unmatched Items (Category B)', Count: unmatchedB.length, Amount: unmatchedAmountB },
-                { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: matchedAmountB + unmatchedAmountB },
+                { Category: '8. Total Matched & Unmatched (B)', Count: matched.length + unmatchedB.length, Amount: totalRecB },
                 { Category: '9. Total Consolidated Category B', Count: dfB.length, Amount: totalB },
-                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - (matchedAmountB + unmatchedB.reduce((s,i) => s + (i.Original_Amount_Value_B || 0), 0)) },
+                { Category: '10. Category B Difference (9 minus 8)', Count: dfB.length - (matched.length + unmatchedB.length), Amount: totalB - totalRecB },
                 { Category: '11. Overall Variance (A Total - B Total)', Count: totalA - totalB, Amount: totalA - totalB }
             ];
 
@@ -265,6 +280,8 @@
             
             if (action === 'PROCESS_DATA') {
                 try {
+                    // Files received by the worker are File objects which can be read directly
+                    
                     // Step 1: Read and consolidate files for Category A
                     const allDataA = [];
                     for (const file of filesA) {
@@ -272,7 +289,7 @@
                         allDataA.push(...data);
                         data.length = 0; // Explicitly clear data
                     }
-                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A.' });
+                    postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A. Starting Category B...' });
                     
                     // Step 2: Read and consolidate files for Category B
                     const allDataB = [];
@@ -296,8 +313,6 @@
                     postMessage({ type: 'error', error: error.toString() });
                 }
             }
-            // Garbage collection hint for the worker itself
-            self.postMessage({ type: 'gc_hint' });
         };
     `;
 
@@ -326,7 +341,6 @@
         React.useEffect(() => {
             if (worker) return;
             
-            // Create the worker from the script string
             const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
             const newWorker = new Worker(URL.createObjectURL(workerBlob));
 
@@ -345,8 +359,6 @@
                     setProcessing(false);
                     setStatusMessage('Reconciliation Complete!');
                     setStep(3); // Move to results step
-                    // Garbage collection hint
-                    newWorker.postMessage({ type: 'gc_hint' });
                 }
             };
 
@@ -367,19 +379,26 @@
             if (category === 'A') {
                 const newFiles = categoryAFiles.filter(file => file !== fileToRemove);
                 setCategoryAFiles(newFiles);
-                // Clear columns if no files remain
-                if (newFiles.length === 0) setAvailableColumnsA([]);
-                // If files still remain, re-extract columns from the first file to update dropdowns
-                else if (availableColumnsA.length > 0) extractColumns(newFiles[0], setAvailableColumnsA);
+                // Re-extract headers from the first remaining file
+                if (newFiles.length > 0) {
+                    extractColumns(newFiles[0], setAvailableColumnsA);
+                } else {
+                    setAvailableColumnsA([]);
+                    setColumnConfig(prev => ({ ...prev, uniqueIdA: '', amountA: '' }));
+                }
             } else {
                 const newFiles = categoryBFiles.filter(file => file !== fileToRemove);
                 setCategoryBFiles(newFiles);
-                if (newFiles.length === 0) setAvailableColumnsB([]);
-                else if (availableColumnsB.length > 0) extractColumns(newFiles[0], setAvailableColumnsB);
+                if (newFiles.length > 0) {
+                    extractColumns(newFiles[0], setAvailableColumnsB);
+                } else {
+                    setAvailableColumnsB([]);
+                    setColumnConfig(prev => ({ ...prev, uniqueIdB: '', amountB: '' }));
+                }
             }
         };
 
-        // Helper function for ArrayBuffer to Binary String conversion (Needed for SheetJS)
+        // Helper function for ArrayBuffer to Binary String conversion
         const fixdata = (data) => {
             let o = "", l = 0, w = 10240;
             for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
@@ -387,38 +406,35 @@
             return o;
         };
 
-        // --- STEP 1: EARLY DATA VALIDATION (Headers Only) ---
-        // Enhanced robustness for header extraction using a larger slice.
+        // --- MAX RESILIENCE HEADER EXTRACTION (Reads entire file in main thread) ---
+        // This is necessary because slicing a complex/large XLSX file for headers often fails with compressed data errors.
         const extractColumns = async (file, setColumns) => {
             setError(null);
             return new Promise((resolve) => {
                 const reader = new FileReader();
                 
-                // Read a larger slice (5MB) of the file to reliably get headers, even for complex XLSX structures.
-                const slice = file.slice(0, HEADER_SLICE_SIZE); 
-                
+                // CRITICAL CHANGE: Read the entire file as ArrayBuffer for reliable header extraction
+                // The main thread is blocked briefly, but this is the most reliable way to read headers from complex XLSX/corrupt files.
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
                         let workbook;
-
-                        const fileNameLower = file.name.toLowerCase();
-                        // Detect if it's a CSV based on file name or if the file size is very small (heuristic for non-xlsx)
-                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
                         
+                        const fileNameLower = file.name.toLowerCase();
+                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
+
                         if (isTextFile) {
-                            // For CSV, decode the ArrayBuffer slice to text
+                            // Decode to string for CSV
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
-                            // Read as string type for CSV/TXT
                             workbook = XLSX.read(text, { type: 'string' });
                         } else {
-                            // For binary formats (XLSX, XLS), convert ArrayBuffer slice to binary string
+                            // Convert to binary string for robust XLSX reading
                             const binary = fixdata(data);
-                            workbook = XLSX.read(binary, { type: 'binary' });
+                            workbook = XLSX.read(binary, { type: 'binary', cellDates: true, raw: true });
                         }
-
+                        
                         if (!workbook || workbook.SheetNames.length === 0) {
-                             console.error("SheetJS failed to create workbook from file slice:", file.name);
+                             console.error("SheetJS failed to create workbook:", file.name);
                              setError("File seems corrupted or empty. Cannot read workbook.");
                              resolve([]);
                              return;
@@ -427,14 +443,12 @@
                         const sheetName = workbook.SheetNames[0];
                         const worksheet = workbook.Sheets[sheetName];
                         
-                        // Use sheet_to_json with header: 1 to get data as an array of arrays, 
-                        // where the first element is the header row.
+                        // Get data as an array of arrays
                         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
                         
-                        // Check if headers exist (i.e., the first row)
                         const rawHeaders = json[0] || [];
                         
-                        // Filter out undefined/null headers, convert to string
+                        // Clean and validate headers
                         const validHeaders = rawHeaders
                             .map(h => String(h).trim())
                             .filter(h => h && h.length > 0);
@@ -451,8 +465,7 @@
 
                     } catch (e) {
                         console.error("Header extraction fatal error:", e);
-                        // Provide a more specific error message based on common issues
-                        setError(`Error reading file headers. Please ensure the file (or first 5MB) is a valid Excel/CSV with headers in the first row. Details: ${e.message}`);
+                        setError(`CRITICAL ERROR reading file headers. This is a low-level file structure issue. Details: ${e.message}. Please try saving the file as a plain CSV and re-uploading.`);
                         resolve([]);
                     }
                 };
@@ -463,8 +476,8 @@
                     resolve([]);
                 };
 
-                // Read file as ArrayBuffer for consistent handling of the file slice across formats
-                reader.readAsArrayBuffer(slice);
+                // Read entire file (no slicing)
+                reader.readAsArrayBuffer(file);
             });
         };
 
@@ -476,8 +489,8 @@
             if (category === 'A') {
                 const newFiles = [...categoryAFiles, ...files];
                 setCategoryAFiles(newFiles);
-                // Only extract headers if the column list is currently empty
                 if (availableColumnsA.length === 0 && newFiles.length > 0) {
+                    // Extract headers from the first file uploaded
                     await extractColumns(newFiles[0], setAvailableColumnsA);
                 }
             } else {
@@ -487,7 +500,6 @@
                     await extractColumns(newFiles[0], setAvailableColumnsB);
                 }
             }
-            // Clear the input value so the same files can be re-uploaded if needed
             e.target.value = null;
         };
 
@@ -532,78 +544,69 @@
             const workbook = XLSX.utils.book_new();
             const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
 
+            // Helper for creating report data with dynamic column names
+            const createReportSheet = (data, prefix, uniqueIdKey, amountKey, remarkKey = 'Remark') => {
+                const sheetData = data.map(item => {
+                    const row = {
+                        'Composite_ID': item.Composite_ID,
+                        [remarkKey]: item[remarkKey],
+                    };
+                    
+                    if (item.Original_ID_Value_A !== undefined) {
+                        row[columnConfig.uniqueIdA] = item.Original_ID_Value_A;
+                        row[columnConfig.amountA] = item.Original_Amount_Value_A;
+                        row['Match_Serial_No_A'] = item.Match_Serial_No_A;
+                        row['Appearance_Count_A'] = item.Appearance_Count_A;
+                        row['Source_File_A'] = item.Source_File_A;
+                    }
+                    
+                    if (item.Original_ID_Value_B !== undefined) {
+                        row[columnConfig.uniqueIdB] = item.Original_ID_Value_B;
+                        row[columnConfig.amountB] = item.Original_Amount_Value_B;
+                        row['Match_Serial_No_B'] = item.Match_Serial_No_B;
+                        row['Appearance_Count_B'] = item.Appearance_Count_B;
+                        row['Source_File_B'] = item.Source_File_B;
+                    }
+
+                    // For Consolidated sheets, data structure is simpler
+                    if (item.Original_ID_Value !== undefined) {
+                         row[uniqueIdKey] = item.Original_ID_Value;
+                         row[amountKey] = item.Original_Amount_Value;
+                         row['Match_Serial_No'] = item.Match_Serial_No;
+                         row['Appearance_Count'] = item.Appearance_Count;
+                         row['Source_File'] = item.Source_File;
+                    }
+
+                    return row;
+                });
+                return XLSX.utils.json_to_sheet(sheetData);
+            };
+
             // 1. Summary Sheet
             const ws_summary = XLSX.utils.json_to_sheet(results.summary);
             XLSX.utils.book_append_sheet(workbook, ws_summary, "1_Summary");
 
             // 2. Matched Records
-            const matchedForDownload = results.matched.map(item => ({
-                'Composite_ID': item.Composite_ID,
-                'Remark': item.Remark,
-                [columnConfig.uniqueIdA]: item.Original_ID_Value_A,
-                [columnConfig.amountA]: item.Original_Amount_Value_A,
-                'Match_Serial_No_A': item.Match_Serial_No_A,
-                'Appearance_Count_A': item.Appearance_Count_A,
-                'Source_File_A': item.Source_File_A,
-                [columnConfig.uniqueIdB]: item.Original_ID_Value_B,
-                [columnConfig.amountB]: item.Original_Amount_Value_B,
-                'Match_Serial_No_B': item.Match_Serial_No_B,
-                'Appearance_Count_B': item.Appearance_Count_B,
-                'Source_File_B': item.Source_File_B,
-            }));
-            const ws_matched = XLSX.utils.json_to_sheet(matchedForDownload);
+            const ws_matched = createReportSheet(results.matched, 'Matched');
             XLSX.utils.book_append_sheet(workbook, ws_matched, "2_Matched_Records");
 
             // 3. Unmatched Category A
-            const unmatchedAForDownload = results.unmatchedA.map(item => ({
-                'Composite_ID': item.Composite_ID,
-                'Remark': item.Remark,
-                [columnConfig.uniqueIdA]: item.Original_ID_Value_A,
-                [columnConfig.amountA]: item.Original_Amount_Value_A,
-                'Match_Serial_No_A': item.Match_Serial_No_A,
-                'Appearance_Count_A': item.Appearance_Count_A,
-                'Source_File_A': item.Source_File_A,
-            }));
-            const ws_unmatchedA = XLSX.utils.json_to_sheet(unmatchedAForDownload);
+            const ws_unmatchedA = createReportSheet(results.unmatchedA, 'UnmatchedA', columnConfig.uniqueIdA, columnConfig.amountA, 'Remark');
             XLSX.utils.book_append_sheet(workbook, ws_unmatchedA, "3_Unmatched_Category_A");
 
             // 4. Unmatched Category B
-            const unmatchedBForDownload = results.unmatchedB.map(item => ({
-                'Composite_ID': item.Composite_ID,
-                'Remark': item.Remark,
-                [columnConfig.uniqueIdB]: item.Original_ID_Value_B,
-                [columnConfig.amountB]: item.Original_Amount_Value_B,
-                'Match_Serial_No_B': item.Match_Serial_No_B,
-                'Appearance_Count_B': item.Appearance_Count_B,
-                'Source_File_B': item.Source_File_B,
-            }));
-            const ws_unmatchedB = XLSX.utils.json_to_sheet(unmatchedBForDownload);
+            const ws_unmatchedB = createReportSheet(results.unmatchedB, 'UnmatchedB', columnConfig.uniqueIdB, columnConfig.amountB, 'Remark');
             XLSX.utils.book_append_sheet(workbook, ws_unmatchedB, "4_Unmatched_Category_B");
             
-            // 5. Consolidated Data A (For audit)
-             const dfAForDownload = results.dfA.map(item => ({
-                [columnConfig.uniqueIdA]: item.Original_ID_Value,
-                [columnConfig.amountA]: item.Original_Amount_Value,
-                'Composite_ID': item.Composite_ID,
-                'Match_Serial_No': item.Match_Serial_No,
-                'Appearance_Count': item.Appearance_Count,
-                'Source_File': item.Source_File,
-            }));
-            const ws_dfA = XLSX.utils.json_to_sheet(dfAForDownload);
+            // 5. Consolidated Data A (For audit) - Using the simple structure from worker
+            const ws_dfA = createReportSheet(results.dfA.map(item => ({...item, Original_ID_Value_A: item.Original_ID_Value, Original_Amount_Value_A: item.Original_Amount_Value})), 
+                'ConsolidatedA', columnConfig.uniqueIdA, columnConfig.amountA);
             XLSX.utils.book_append_sheet(workbook, ws_dfA, "5_Consolidated_A");
 
             // 6. Consolidated Data B (For audit)
-             const dfBForDownload = results.dfB.map(item => ({
-                [columnConfig.uniqueIdB]: item.Original_ID_Value,
-                [columnConfig.amountB]: item.Original_Amount_Value,
-                'Composite_ID': item.Composite_ID,
-                'Match_Serial_No': item.Match_Serial_No,
-                'Appearance_Count': item.Appearance_Count,
-                'Source_File': item.Source_File,
-            }));
-            const ws_dfB = XLSX.utils.json_to_sheet(dfBForDownload);
+            const ws_dfB = createReportSheet(results.dfB.map(item => ({...item, Original_ID_Value_B: item.Original_ID_Value, Original_Amount_Value_B: item.Original_Amount_Value})), 
+                'ConsolidatedB', columnConfig.uniqueIdB, columnConfig.amountB);
             XLSX.utils.book_append_sheet(workbook, ws_dfB, "6_Consolidated_B");
-
 
             XLSX.writeFile(workbook, `Reconciliation_Report_${timestamp}.xlsx`);
         };
@@ -720,17 +723,17 @@
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Metric</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Count</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount</th>
+                                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Metric</th>
+                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Count</th>
+                                <th className="text-right py-3 px-4 text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount (USD)</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                             {summary.map((row, idx) => (
                                 <tr key={idx} className={`${getRowClass(idx)}`}>
-                                    <td className="py-2 px-3 text-sm font-medium text-gray-800">{row.Category}</td>
-                                    <td className="text-right py-2 px-3 text-sm text-gray-700">{row.Count.toLocaleString()}</td>
-                                    <td className="text-right py-2 px-3 text-sm text-gray-700">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                    <td className="py-2 px-4 text-sm font-medium text-gray-800">{row.Category}</td>
+                                    <td className="text-right py-2 px-4 text-sm text-gray-700">{row.Count.toLocaleString()}</td>
+                                    <td className="text-right py-2 px-4 text-sm text-gray-700">{row.Amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -746,10 +749,10 @@
                     {/* Header */}
                     <div className="text-center mb-12">
                         <h1 className="text-3xl font-extrabold text-gray-900 sm:text-4xl rounded-xl shadow-md p-4 bg-white border border-blue-100">
-                            High-Volume Reconciliation Engine
+                            Max Resilience Reconciliation Engine
                         </h1>
                         <p className="mt-3 text-xl text-gray-500">
-                            Optimized for millions of rows using Web Workers and chunked processing.
+                            Reading large, tricky files by guaranteeing full file integrity checks for headers.
                         </p>
                     </div>
 
