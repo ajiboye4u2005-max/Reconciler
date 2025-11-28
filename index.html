@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Full Traceability & Structured Output)</title>
+    <title>Advanced Reconciliation Tool (Layered ID Extraction)</title>
     <!-- Load React and ReactDOM from CDN -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -13,50 +13,236 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Load SheetJS/XLSX for Excel file handling -->
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-    <style>
-        .input-file-container {
-            position: relative;
-            overflow: hidden;
-            display: inline-block;
-        }
-        .input-file-container input[type=file] {
-            position: absolute;
-            top: 0;
-            left: 0;
-            opacity: 0;
-            cursor: pointer;
-            width: 100%;
-            height: 100%;
-        }
-    </style>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
-    // Destructure hooks from the global React object for easy access
+    // Destructure hooks from the global React object for easy access (FIX: addresses ReferenceError: useState is not defined)
     const { useState, useEffect, useCallback, useMemo } = React;
     
     // --- ICON PLACEHOLDERS (Replacing lucide-react imports for single-file HTML) ---
     const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
         <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
     );
-    const Upload = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></IconWrapper>;
-    const FileSpreadsheet = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M15 13H9"/><path d="M15 17H9"/></svg></IconWrapper>;
-    const AlertCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></IconWrapper>;
-    const CheckCircle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></IconWrapper>;
-    const Download = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg></IconWrapper>;
-    const X = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></IconWrapper>;
-    const Info = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></IconWrapper>;
-    const ChevronDown = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg></IconWrapper>;
+    const Upload = (props) => <IconWrapper {...props}><span role="img" aria-label="Upload" className="font-bold">⤒</span></IconWrapper>;
+    const FileSpreadsheet = (props) => <IconWrapper {...props}><span role="img" aria-label="Spreadsheet" className="font-bold">📋</span></IconWrapper>;
+    const FileDown = (props) => <IconWrapper {...props}><span role="img" aria-label="Download" className="font-bold">↓</span></IconWrapper>;
+    const Info = (props) => <IconWrapper {...props}><span role="img" aria-label="Info" className="font-bold">ⓘ</span></IconWrapper>;
+    const Check = (props) => <IconWrapper {...props}><span role="img" aria-label="Check" className="font-bold">✓</span></IconWrapper>;
+    const X = (props) => <IconWrapper {...props}><span role="img" aria-label="Error" className="font-bold">✕</span></IconWrapper>;
+    
+    // Constants
+    const CATEGORIES = {
+        A: 'Category A',
+        B: 'Category B',
+    };
 
-    /**
-     * Helper to read the first sheet of an Excel/CSV file and extract column headers and data.
-     * @param {File} file - The file object to read.
-     * @param {function} setColumns - State setter for column names.
-     * @returns {Promise<Array<Object>>} - The array of records.
-     */
-    const readWorkbook = (file) => {
+    // Helper to format numbers as currency
+    const formatCurrency = (value) => {
+        if (value === null || value === undefined) return 'N/A';
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(value);
+    };
+
+    // Helper to format numbers as integers with separators
+    const formatNumber = (value) => {
+        if (value === null || value === undefined) return 'N/A';
+        return new Intl.NumberFormat('en-US').format(value);
+    };
+
+    // --- Core Logic ---
+
+    // 1. Data Cleaning and Preparation
+    const cleanCell = (value) => {
+        if (typeof value === 'string') {
+            // Remove all non-alphanumeric characters except spaces and hyphens, and normalize case
+            return value.trim().toUpperCase().replace(/[^A-Z0-9\s-]/g, '');
+        }
+        return String(value).trim().toUpperCase();
+    };
+
+    const extractCompositeId = (narration) => {
+        // Look for common ID patterns in the narration string
+        // This is a simplified regex logic for demonstration
+        const refMatch = narration.match(/REF[:\s]([A-Z0-9]{15,})/); // e.g., REF:12345678901234567890
+        if (refMatch) return refMatch[1];
+        
+        const txnMatch = narration.match(/TXN[:\s]([A-Z0-9]{15,})/); // e.g., TXN:12345678901234567890
+        if (txnMatch) return txnMatch[1];
+
+        // Fallback: If no clear ID is found, use a hash or placeholder based on the whole string
+        return narration.substring(0, 50); // A non-unique fallback is acceptable for "unidentified" items
+    };
+
+    // 2. Reconciliation Logic (The heavy lifting)
+    const calculateReconciliation = (dataA, dataB) => {
+        if (!dataA.length || !dataB.length) {
+            return {
+                matched: [], unmatchedA: [], unmatchedB: [], duplicatedA: new Map(), duplicatedB: new Map(),
+                summaryMetricsA: {}, summaryMetricsB: {},
+            };
+        }
+
+        const compositeDataA = dataA.map((row, index) => {
+            const narration = String(row.Narration || '');
+            const id = extractCompositeId(narration);
+            return {
+                ...row,
+                Composite_ID: id,
+                Amount: (row.Credit || 0) - (row.Debit || 0), // Calculate net amount
+                __Source_File: row.__Source_File, // Retain for traceability
+                __Original_Row_Index: index + 2, // 1 for header, 1 for 0-indexing
+                __UniqueRef: row.UniqueRef,
+            };
+        });
+
+        const compositeDataB = dataB.map((row, index) => {
+            const narration = String(row.Narration || '');
+            const id = extractCompositeId(narration);
+            return {
+                ...row,
+                Composite_ID: id,
+                Amount: (row.Credit || 0) - (row.Debit || 0), // Calculate net amount
+                __Source_File: row.__Source_File,
+                __Original_Row_Index: index + 2,
+                __UniqueRef: row.UniqueRef,
+            };
+        });
+
+        // --- Core Reconciliation Maps ---
+        const mapA = new Map(); // Key: Composite_ID, Value: Array of records
+        const mapB = new Map(); 
+
+        const populateMap = (data, map) => {
+            data.forEach(item => {
+                const key = item.Composite_ID;
+                if (map.has(key)) {
+                    map.get(key).push(item);
+                } else {
+                    map.set(key, [item]);
+                }
+            });
+        };
+
+        populateMap(compositeDataA, mapA);
+        populateMap(compositeDataB, mapB);
+
+        // --- Results Containers ---
+        const matched = [];
+        const unmatchedA = [];
+        const unmatchedB = [];
+        const duplicatedA = new Map(); // Key: Composite_ID, Value: Array of records (where count > 1)
+        const duplicatedB = new Map();
+
+        // --- 1. Identify Duplicates and prepare for matching (Unique IDs only) ---
+
+        const getUniqueIdRecords = (map, duplicatedMap) => {
+            const uniqueRecords = new Map(); // Key: Composite_ID, Value: Single record
+            map.forEach((records, id) => {
+                if (records.length > 1) {
+                    duplicatedMap.set(id, records.map((r, i) => ({ ...r, Appearance_Count: i + 1 })));
+                } else {
+                    uniqueRecords.set(id, records[0]);
+                }
+            });
+            return uniqueRecords;
+        };
+
+        const uniqueMapA = getUniqueIdRecords(mapA, duplicatedA);
+        const uniqueMapB = getUniqueIdRecords(mapB, duplicatedB);
+
+        // --- 2. Perform Matching (Only on unique IDs) ---
+
+        // Find matches and remaining unmatched in A
+        uniqueMapA.forEach((recordA, id) => {
+            if (uniqueMapB.has(id)) {
+                const recordB = uniqueMapB.get(id);
+                
+                // Add to matched list
+                matched.push({
+                    ...recordA, 
+                    ...recordB,
+                    Composite_ID: id, // Ensure ID is present in the final object
+                });
+                // Remove from B's unique map to mark as processed
+                uniqueMapB.delete(id);
+            } else {
+                // Not found in B
+                unmatchedA.push({ ...recordA, Appearance_Count: 1 });
+            }
+        });
+
+        // The remaining records in uniqueMapB are unmatched
+        uniqueMapB.forEach((recordB, id) => {
+            unmatchedB.push({ ...recordB, Appearance_Count: 1 });
+        });
+
+        // --- 3. Calculate Summary Metrics ---
+        
+        // Helper to calculate summary metrics
+        const calculateMetrics = (data, duplicatedMap) => {
+            const totalDistinctCount = data.length;
+            const totalDistinctAmount = data.reduce((sum, item) => sum + (item.Amount || 0), 0);
+
+            let totalDuplicatedUniqueIDs = 0;
+            let totalDuplicatedAmount = 0;
+            let totalDuplicatedItemCount = 0;
+
+            duplicatedMap.forEach(records => {
+                totalDuplicatedUniqueIDs++;
+                totalDuplicatedItemCount += records.length;
+                totalDuplicatedAmount += records.reduce((sum, item) => sum + (item.Amount || 0), 0);
+            });
+            
+            return {
+                totalDistinctCount,
+                totalDistinctAmount,
+                totalDuplicatedUniqueIDs,
+                totalDuplicatedAmount,
+                totalDuplicatedItemCount,
+            };
+        };
+
+        const summaryA = {
+            ...calculateMetrics([...unmatchedA, ...matched.map(m => ({ Amount: m.Amount }))], duplicatedA),
+            matchedCount: matched.length,
+            matchedAmount: matched.reduce((sum, m) => sum + (m.Amount || 0), 0),
+            unmatchedCount: unmatchedA.length,
+            unmatchedAmount: unmatchedA.reduce((sum, u) => sum + (u.Amount || 0), 0),
+        };
+        
+        const summaryB = {
+            ...calculateMetrics([...unmatchedB, ...matched.map(m => ({ Amount: m.Amount }))], duplicatedB),
+            matchedCount: matched.length, // Matched count is the same for both
+            matchedAmount: matched.reduce((sum, m) => sum + (m.Amount || 0), 0),
+            unmatchedCount: unmatchedB.length,
+            unmatchedAmount: unmatchedB.reduce((sum, u) => sum + (u.Amount || 0), 0),
+        };
+
+        // Combine matched data for download
+        const matchedOutputA = matched.map(m => ({ ...m, Appearance_Count: 1, Composite_ID: m.Composite_ID, __Source_File: m.__Source_File, __Original_Row_Index: m.__Original_Row_Index }));
+        const matchedOutputB = matched.map(m => ({ ...m, Appearance_Count: 1, Composite_ID: m.Composite_ID, __Source_File: m.__Source_File, __Original_Row_Index: m.__Original_Row_Index }));
+
+
+        return {
+            matchedA: matchedOutputA,
+            matchedB: matchedOutputB,
+            unmatchedA: unmatchedA,
+            unmatchedB: unmatchedB,
+            duplicatedA: Array.from(duplicatedA.values()).flat(),
+            duplicatedB: Array.from(duplicatedB.values()).flat(),
+            summaryMetricsA: summaryA,
+            summaryMetricsB: summaryB,
+        };
+    };
+
+    // 3. File Processing
+    const processFile = (file, category) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -65,675 +251,532 @@
                     const workbook = XLSX.read(data, { type: 'array' });
                     const sheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[sheetName];
-                    // Use array of arrays to preserve data integrity and handle large files better
-                    const aoa = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-                    if (aoa.length === 0) {
-                        return reject(new Error("File is empty or could not be parsed."));
+                    // Read data, ensuring all values are treated as text/strings to preserve unique IDs
+                    const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null, raw: false });
+                    
+                    if (json.length < 2) {
+                        return reject(new Error("File is empty or contains only headers."));
                     }
 
-                    // The first row is the header
-                    const headers = aoa[0];
-                    // The rest is data
-                    const rawData = aoa.slice(1);
+                    const headers = json[0].map(h => h ? h.trim() : '');
+                    const requiredCols = ['Narration', 'Debit', 'Credit', 'UniqueRef']; // Essential columns
+                    if (!requiredCols.every(col => headers.includes(col))) {
+                        return reject(new Error(`Missing required columns: ${requiredCols.join(', ')}. Found: ${headers.join(', ')}`));
+                    }
 
-                    const records = rawData.map((row, index) => {
-                        const record = {};
-                        headers.forEach((header, colIndex) => {
-                            // Trim header names for consistent key access
-                            const key = String(header).trim();
-                            // Assign cell value, default to null if undefined
-                            record[key] = row[colIndex] === undefined ? null : row[colIndex];
+                    const dataRows = json.slice(1).map(row => {
+                        const rowData = {};
+                        headers.forEach((header, index) => {
+                            let value = row[index];
+                            if (header === 'Debit' || header === 'Credit') {
+                                // Convert numeric values, handle nulls gracefully
+                                rowData[header] = typeof value === 'string' ? parseFloat(value.replace(/,/g, '')) : (value || 0);
+                            } else {
+                                // Keep all other fields as string
+                                rowData[header] = String(value || '');
+                            }
                         });
-                        // Add mandatory meta data for traceability
-                        record.__Source_File = file.name;
-                        record.__Original_Row_Index = index + 2; // +1 for 0-index to 1-index, +1 for header row
-                        return record;
-                    }).filter(record => 
-                        // Filter out records that are completely empty (optional, but good practice)
-                        Object.keys(record).some(key => !key.startsWith('__') && record[key] !== null && String(record[key]).trim() !== '')
-                    );
-
-                    resolve({ records, headers });
-                } catch (err) {
-                    console.error("Error reading workbook:", err);
-                    reject(new Error(`Failed to process file: ${file.name}. Ensure it's a valid Excel or CSV format.`));
+                        rowData.__Source_File = file.name;
+                        return rowData;
+                    });
+                    
+                    resolve(dataRows);
+                } catch (error) {
+                    reject(new Error(`Error processing file ${file.name}: ${error.message}`));
                 }
             };
-            reader.onerror = (error) => reject(error);
+            reader.onerror = (error) => reject(new Error(`Error reading file ${file.name}: ${error.message}`));
             reader.readAsArrayBuffer(file);
         });
     };
-
-    /**
-     * Executes the core reconciliation logic and calculates all required summary metrics.
-     * @param {Array<Object>} recordsA - All records from Category A.
-     * @param {Array<Object>} recordsB - All records from Category B.
-     * @param {Object} config - Column configuration (uniqueIdA, amountA, etc.).
-     * @returns {Object} - Reconciliation results including all sheets data and summaries.
-     */
-    const doReconciliation = (recordsA, recordsB, config) => {
-        console.log("Starting reconciliation with", recordsA.length, "A records and", recordsB.length, "B records.");
+    
+    // 4. Download Logic (Updated for selective and complex summary sheet)
+    const cleanDataForDownload = (data, type) => {
+        if (!data || data.length === 0) return [];
         
-        // --- 1. Data Preparation and Composite ID generation ---
-        const prepareRecords = (records, uniqueIdCol, amountCol) => {
-            return records.map(record => {
-                const amount = parseFloat(record[amountCol]) || 0;
-                const uniqueId = String(record[uniqueIdCol]).trim();
-                return {
-                    ...record,
-                    // Use a string representation for consistent matching key
-                    [uniqueIdCol]: uniqueId, // Ensure unique ID is string for consistency
-                    [amountCol]: amount,     // Ensure amount is number for calculations
-                    __Composite_ID: `${uniqueId}|${amount.toFixed(2)}`,
-                    __Matched: false,
-                    __Appearance_Count: 0, // Placeholder
-                };
+        // Define the desired order and inclusion for all output sheets
+        const baseHeaders = Object.keys(data[0]);
+        
+        const traceColumns = ['Composite_ID', '__Source_File', '__Original_Row_Index', 'Appearance_Count'];
+        const amountColumns = ['Amount', 'Debit', 'Credit'];
+        const keyColumns = ['UniqueRef', 'Account No', 'Date', 'Narration'];
+
+        const desiredOrder = [...traceColumns, ...keyColumns, ...amountColumns].filter(col => baseHeaders.includes(col) || col === 'Appearance_Count');
+        
+        const headerMap = {
+            'Composite_ID': 'Composite_ID',
+            '__Source_File': 'Source_File',
+            '__Original_Row_Index': 'Original_Row_Index',
+            'Appearance_Count': 'Appearance_Count',
+            'Amount': 'Net_Amount (Credit - Debit)',
+        };
+
+        // Create clean, ordered data array
+        return data.map(row => {
+            const newRow = {};
+            desiredOrder.forEach(col => {
+                newRow[headerMap[col] || col] = row[col] !== undefined ? row[col] : (col === 'Appearance_Count' ? 1 : '');
             });
-        };
-
-        let preparedA = prepareRecords(recordsA, config.uniqueIdA, config.amountA);
-        let preparedB = prepareRecords(recordsB, config.uniqueIdB, config.amountB);
-
-        // --- 2. Calculate Appearance Counts and Identify Duplicates (by Unique ID) ---
-        const calculateCounts = (records, uniqueIdCol, category) => {
-            const uniqueIdMap = new Map();
-            for (const record of records) {
-                const id = record[uniqueIdCol];
-                uniqueIdMap.set(id, (uniqueIdMap.get(id) || 0) + 1);
-            }
-            
-            // Augment records with their appearance count
-            const augmentedRecords = records.map(record => ({
-                ...record,
-                __Appearance_Count: uniqueIdMap.get(record[uniqueIdCol]),
-            }));
-            
-            // Filter duplicates (records where their Unique ID appears > 1 time)
-            const duplicates = augmentedRecords.filter(record => record.__Appearance_Count > 1);
-            
-            // Identify unique records (only one appearance of that Unique ID)
-            const uniqueRecords = augmentedRecords.filter(record => record.__Appearance_Count === 1);
-            
-            return { augmentedRecords, duplicates, uniqueRecords, uniqueIdMap };
-        };
-
-        const { augmentedRecords: allA, duplicates: duplicatesA } = calculateCounts(preparedA, config.uniqueIdA, 'A');
-        const { augmentedRecords: allB, duplicates: duplicatesB } = calculateCounts(preparedB, config.uniqueIdB, 'B');
-
-        // --- 3. Core Reconciliation (Composite ID) ---
-        
-        // Use a Map for efficient lookup and removal of B records
-        const mapB = new Map();
-        for (const record of allB) {
-            // For simple 1:1 match, store the record or an array for 1:N/N:N
-            // We'll use an array to handle potential 1:N or N:N situations, though Composite_ID usually enforces 1:1
-            if (!mapB.has(record.__Composite_ID)) {
-                mapB.set(record.__Composite_ID, []);
-            }
-            mapB.get(record.__Composite_ID).push(record);
-        }
-
-        const matchedRecords = [];
-        const unmatchedA = [];
-
-        // Try to match A records against B map
-        for (const recordA of allA) {
-            const compositeId = recordA.__Composite_ID;
-            if (mapB.has(compositeId) && mapB.get(compositeId).length > 0) {
-                // Perform a 1-to-1 match
-                const recordB = mapB.get(compositeId).shift(); // Take the first B record and remove it
-                
-                recordA.__Matched = true;
-                recordB.__Matched = true;
-
-                // Create combined matched record
-                matchedRecords.push({
-                    A: recordA,
-                    B: recordB,
-                    __Composite_ID: compositeId,
-                });
-                
-                // If the array for this Composite_ID is now empty, remove the key from the map
-                if (mapB.get(compositeId).length === 0) {
-                    mapB.delete(compositeId);
-                }
-            } else {
-                unmatchedA.push(recordA);
-            }
-        }
-        
-        // Remaining records in mapB are unmatched B records
-        const unmatchedB = Array.from(mapB.values()).flat();
-
-        console.log("Reconciliation complete. Matched:", matchedRecords.length, "Unmatched A:", unmatchedA.length, "Unmatched B:", unmatchedB.length);
-
-
-        // --- 4. Summary Calculation ---
-        const generateSummaryMetrics = (allRecords, unmatchedRecords, matchedRecords, duplicates, uniqueIdCol, amountCol, matchedSide) => {
-            const summary = [];
-            const isA = matchedSide === 'A';
-
-            // Calculate totals from ALL records in this category
-            const totalCount = allRecords.length;
-            const totalAmount = allRecords.reduce((sum, r) => sum + r[amountCol], 0);
-
-            // Calculate metrics for unique vs duplicated IDs
-            const uniqueIdSet = new Set();
-            const duplicatedIdSet = new Set();
-            
-            for (const record of allRecords) {
-                if (record.__Appearance_Count > 1) {
-                    duplicatedIdSet.add(record[uniqueIdCol]);
-                } else {
-                    uniqueIdSet.add(record[uniqueIdCol]);
-                }
-            }
-            
-            // Note: The user requested counts and amounts of UNIQUE ID vs DUPLICATED ID, not unique records vs duplicated records.
-            // A Duplicated ID is one that appears > 1 time. The records tied to these IDs are the 'Duplicated records'.
-
-            const uniqueIdRecords = allRecords.filter(r => r.__Appearance_Count === 1);
-            const duplicatedIdRecords = allRecords.filter(r => r.__Appearance_Count > 1);
-            
-            const uniqueIdCount = uniqueIdRecords.length;
-            const uniqueIdAmount = uniqueIdRecords.reduce((sum, r) => sum + r[amountCol], 0);
-
-            const duplicatedIdCount = duplicatedIdRecords.length;
-            const duplicatedIdAmount = duplicatedIdRecords.reduce((sum, r) => sum + r[amountCol], 0);
-
-            // --- Section 1: Unique & Duplicated Totals ---
-            summary.push({ Category: 'Unique ID Count', Count: uniqueIdCount, Amount: uniqueIdAmount });
-            summary.push({ Category: 'Duplicated ID Count', Count: duplicatedIdCount, Amount: duplicatedIdAmount });
-            
-            const controlTotalCount = uniqueIdCount + duplicatedIdCount;
-            const controlTotalAmount = uniqueIdAmount + duplicatedIdAmount;
-            
-            summary.push({ Category: 'Total Control Count (Unique + Duplicated)', Count: controlTotalCount, Amount: controlTotalAmount, isTotal: true });
-            
-            // Blank Row
-            summary.push({ Category: '', Count: null, Amount: null, isBlank: true });
-            
-            // --- Section 2: Matched & Unmatched Totals ---
-            
-            // Matched metrics (using only the current category's data from the matched set)
-            const matchedCount = matchedRecords.length;
-            const matchedAmount = matchedRecords.reduce((sum, m) => sum + (isA ? m.A[amountCol] : m.B[amountCol]), 0);
-            
-            // Unmatched metrics (using the already calculated unmatched array)
-            const unmatchedCount = unmatchedRecords.length;
-            const unmatchedAmount = unmatchedRecords.reduce((sum, r) => sum + r[amountCol], 0);
-
-            summary.push({ Category: 'Matched Count (Composite ID)', Count: matchedCount, Amount: matchedAmount });
-            summary.push({ Category: 'Unmatched Count', Count: unmatchedCount, Amount: unmatchedAmount });
-
-            const matchTotalCount = matchedCount + unmatchedCount;
-            const matchTotalAmount = matchedAmount + unmatchedAmount;
-
-            summary.push({ Category: 'Total Matched/Unmatched Count', Count: matchTotalCount, Amount: matchTotalAmount, isTotal: true });
-
-            // Blank Row
-            summary.push({ Category: '', Count: null, Amount: null, isBlank: true });
-
-            // --- Section 3: Control Check ---
-            const countCheck = controlTotalCount - matchTotalCount;
-            const amountCheck = controlTotalAmount - matchTotalAmount;
-            
-            summary.push({ Category: 'Control Check (Total Control - Total Matched/Unmatched)', Count: countCheck, Amount: amountCheck, isCheck: true });
-            
-            // Final check: Total should equal total all records.
-            if (countCheck !== 0 || amountCheck.toFixed(2) !== (totalAmount - matchTotalAmount).toFixed(2)) {
-                 console.warn(`Control Check failure for ${matchedSide}: Count Check: ${countCheck}, Amount Check: ${amountCheck}`);
-            }
-
-
-            return { totalCount, totalAmount, summary };
-        };
-
-        const summaryMetricsA = generateSummaryMetrics(allA, unmatchedA, matchedRecords, duplicatesA, config.uniqueIdA, config.amountA, 'A');
-        const summaryMetricsB = generateSummaryMetrics(allB, unmatchedB, matchedRecords, duplicatesB, config.uniqueIdB, config.amountB, 'B');
-        
-        // --- 5. Final Output Structure ---
-        return {
-            summaryMetricsA: summaryMetricsA.summary,
-            summaryMetricsB: summaryMetricsB.summary,
-            
-            // Data for sheet creation
-            allA,
-            allB,
-            matchedRecords,
-            unmatchedA,
-            unmatchedB,
-            duplicatesA,
-            duplicatesB,
-            
-            // Headers (use original headers + new meta)
-            headersA: recordsA.length > 0 ? Object.keys(recordsA[0]) : [],
-            headersB: recordsB.length > 0 ? Object.keys(recordsB[0]) : [],
-        };
+            return newRow;
+        });
     };
 
-    /**
-     * Generates a single Excel file with multiple sheets based on the detailed results.
-     */
-    const generateExcelReport = (results) => {
-        const { summaryMetricsA, summaryMetricsB, matchedRecords, unmatchedA, unmatchedB, duplicatesA, duplicatesB, headersA, headersB } = results;
+    const downloadReport = async (results, selectedDownloads) => {
+        if (selectedDownloads.length === 0) {
+            console.error("No reports selected for download.");
+            return;
+        }
 
         const wb = XLSX.utils.book_new();
-        const commonMeta = ['__Composite_ID', '__Source_File', '__Original_Row_Index', '__Appearance_Count'];
 
-        // Helper to map and filter a record set to an AoA (Array of Arrays for XLSX)
-        const recordsToAoA = (records, originalHeaders, category) => {
-            const allHeaders = [...originalHeaders.filter(h => !h.startsWith('__')), ...commonMeta];
-            const data = records.map(record => {
-                const row = {};
-                for (const h of allHeaders) {
-                    row[h] = record[h] !== undefined ? record[h] : null;
-                }
-                return row;
-            });
-            // Convert array of objects to array of arrays
-            return [allHeaders, ...data.map(obj => allHeaders.map(header => obj[header]))];
-        };
-        
-        // Helper for Summary AoA
-        const summaryToAoA = (summary, category) => {
-            const header = [`${category} Reconciliation Summary`, 'Count', 'Amount'];
-            const data = summary.map(row => [
-                row.Category,
-                row.Count !== null ? row.Count : '',
-                row.Amount !== null ? row.Amount.toFixed(2) : ''
-            ]);
-            return [header, ...data];
-        };
-
-
-        // 1. Summary Sheet A & B
-        const wsSummary = XLSX.utils.aoa_to_sheet([
-            ['CATEGORY A SUMMARY'],
-            ...summaryToAoA(summaryMetricsA, 'Category A'),
-            [],
-            ['CATEGORY B SUMMARY'],
-            ...summaryToAoA(summaryMetricsB, 'Category B')
-        ]);
-        XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
-        
-        // --- Matched Records ---
-        // Combine headers: A headers first, then B headers
-        const matchedHeadersA = headersA.filter(h => !h.startsWith('__'));
-        const matchedHeadersB = headersB.filter(h => !h.startsWith('__'));
-        const matchedOutputHeaders = [
-            ...matchedHeadersA.map(h => `A - ${h}`),
-            ...matchedHeadersB.map(h => `B - ${h}`),
-            '__Composite_ID', 'A - __Source_File', 'B - __Source_File', 'A - __Original_Row_Index', 'B - __Original_Row_Index', 'A - __Appearance_Count', 'B - __Appearance_Count'
+        const allSheets = [
+            { id: 'matchedA', name: 'A_Matched', data: cleanDataForDownload(results.matchedA, 'Matched') },
+            { id: 'unmatchedA', name: 'A_Unmatched', data: cleanDataForDownload(results.unmatchedA, 'Unmatched') },
+            { id: 'duplicatedA', name: 'A_Duplicated', data: cleanDataForDownload(results.duplicatedA, 'Duplicated') },
+            { id: 'matchedB', name: 'B_Matched', data: cleanDataForDownload(results.matchedB, 'Matched') },
+            { id: 'unmatchedB', name: 'B_Unmatched', data: cleanDataForDownload(results.unmatchedB, 'Unmatched') },
+            { id: 'duplicatedB', name: 'B_Duplicated', data: cleanDataForDownload(results.duplicatedB, 'Duplicated') },
         ];
 
-        const matchedData = matchedRecords.map(m => {
-            const row = {};
-            matchedHeadersA.forEach(h => row[`A - ${h}`] = m.A[h]);
-            matchedHeadersB.forEach(h => row[`B - ${h}`] = m.B[h]);
-            row['__Composite_ID'] = m.__Composite_ID;
-            row['A - __Source_File'] = m.A.__Source_File;
-            row['B - __Source_File'] = m.B.__Source_File;
-            row['A - __Original_Row_Index'] = m.A.__Original_Row_Index;
-            row['B - __Original_Row_Index'] = m.B.__Original_Row_Index;
-            row['A - __Appearance_Count'] = m.A.__Appearance_Count;
-            row['B - __Appearance_Count'] = m.B.__Appearance_Count;
-            return row;
+        // Add selected data sheets
+        allSheets.filter(sheet => selectedDownloads.includes(sheet.id)).forEach(sheet => {
+            if (sheet.data.length > 0) {
+                const ws = XLSX.utils.json_to_sheet(sheet.data);
+                XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+            } else {
+                // Add empty sheet if selected but no data
+                const ws = XLSX.utils.aoa_to_sheet([['No Data']]);
+                XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+            }
         });
 
-        const wsMatched = XLSX.utils.json_to_sheet(matchedData, { header: matchedOutputHeaders });
-        XLSX.utils.book_append_sheet(wb, wsMatched, "Matched (A & B)");
+        // ----------------------------------------------------
+        // Generate the Complex Summary Sheet if selected
+        // ----------------------------------------------------
+        if (selectedDownloads.includes('summary')) {
+            const smA = results.summaryMetricsA;
+            const smB = results.summaryMetricsB;
 
-        // --- Unmatched Sheets ---
-        const wsUnmatchedA = XLSX.utils.aoa_to_sheet(recordsToAoA(unmatchedA, headersA, 'A'));
-        XLSX.utils.book_append_sheet(wb, wsUnmatchedA, "Unmatched A");
+            // Calculate Totals required for the final summary lines
+            const totalMatchedCount = smA.matchedCount; // A and B matched counts are the same by definition
+            const totalMatchedAmount = smA.matchedAmount;
 
-        const wsUnmatchedB = XLSX.utils.aoa_to_sheet(recordsToAoA(unmatchedB, headersB, 'B'));
-        XLSX.utils.book_append_sheet(wb, wsUnmatchedB, "Unmatched B");
-        
-        // --- Duplicates Sheets (based on Unique ID) ---
-        const wsDuplicatesA = XLSX.utils.aoa_to_sheet(recordsToAoA(duplicatesA, headersA, 'A'));
-        XLSX.utils.book_append_sheet(wb, wsDuplicatesA, "Duplicated ID - A");
-        
-        const wsDuplicatesB = XLSX.utils.aoa_to_sheet(recordsToAoA(duplicatesB, headersB, 'B'));
-        XLSX.utils.book_append_sheet(wb, wsDuplicatesB, "Duplicated ID - B");
+            const totalUnmatchedCount = smA.unmatchedCount + smB.unmatchedCount;
+            const totalUnmatchedAmount = smA.unmatchedAmount + smB.unmatchedAmount;
+
+            const grandTotalDistinctCountA = smA.totalDistinctCount;
+            const grandTotalDistinctAmountA = smA.totalDistinctAmount;
+            const grandTotalDistinctCountB = smB.totalDistinctCount;
+            const grandTotalDistinctAmountB = smB.totalDistinctAmount;
+
+            const totalDuplicatedUniqueIDsA = smA.totalDuplicatedUniqueIDs;
+            const totalDuplicatedAmountA = smA.totalDuplicatedAmount;
+            const totalDuplicatedUniqueIDsB = smB.totalDuplicatedUniqueIDs;
+            const totalDuplicatedAmountB = smB.totalDuplicatedAmount;
+            
+            // Total of the 2 (Distinct + Duplicated unique IDs)
+            const overallTotalCountA = grandTotalDistinctCountA + totalDuplicatedUniqueIDsA;
+            const overallTotalAmountA = grandTotalDistinctAmountA + totalDuplicatedAmountA;
+            const overallTotalCountB = grandTotalDistinctCountB + totalDuplicatedUniqueIDsB;
+            const overallTotalAmountB = grandTotalDistinctAmountB + totalDuplicatedAmountB;
+
+            // Grand Total (A + B)
+            const overallGrandTotalCount = overallTotalCountA + overallTotalCountB;
+            const overallGrandTotalAmount = overallTotalAmountA + overallTotalAmountB;
+
+            // Total Matched + Unmatched (A + B)
+            const matchedUnmatchedTotalCount = totalMatchedCount + totalUnmatchedCount;
+            const matchedUnmatchedTotalAmount = totalMatchedAmount + totalUnmatchedAmount;
+
+            // Difference
+            const differenceCount = overallGrandTotalCount - matchedUnmatchedTotalCount;
+            const differenceAmount = overallGrandTotalAmount - matchedUnmatchedTotalAmount;
 
 
-        // --- Download ---
-        XLSX.writeFile(wb, `Reconciliation_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            const summaryData = [
+                ['SUMMARY: A vs B Reconciliation Metrics', null, null, null, null],
+                ['Metric Description', 'Category A (Count)', 'Category A (Amount)', 'Category B (Count)', 'Category B (Amount)'],
+                // Distinct Unique ID count and amount
+                ['Total Distinct Unique IDs (Matches + Unmatched)', 
+                    grandTotalDistinctCountA, grandTotalDistinctAmountA, 
+                    grandTotalDistinctCountB, grandTotalDistinctAmountB
+                ],
+                // Total Duplicated unique ID count and amount
+                ['Total Duplicated Unique IDs', 
+                    totalDuplicatedUniqueIDsA, totalDuplicatedAmountA, 
+                    totalDuplicatedUniqueIDsB, totalDuplicatedAmountB
+                ],
+                // Total of the 2 (Distinct + Duplicated)
+                ['GRAND TOTAL OF UNIQUE IDs (Distinct + Duplicated IDs)', 
+                    overallTotalCountA, overallTotalAmountA, 
+                    overallTotalCountB, overallTotalAmountB
+                ],
+                // Blank row for separation
+                [], 
+                // Total Matched and Unmatched (combined A & B)
+                ['--- Combined Reconciliation Metrics (A & B) ---', null, null, null, null],
+                ['Total Matched Unique IDs (A vs B)', totalMatchedCount, totalMatchedAmount, null, null],
+                ['Total Unmatched Unique IDs (A + B)', totalUnmatchedCount, totalUnmatchedAmount, null, null],
+                ['TOTAL MATCHED & UNMATCHED ITEMS', matchedUnmatchedTotalCount, matchedUnmatchedTotalAmount, null, null],
+                // Blank row for separation
+                [], 
+                // Deduct the 2 totals
+                ['TOTAL DIFFERENCE (Grand Total Unique IDs - Matched & Unmatched Total)', differenceCount, differenceAmount, null, null],
+            ];
+
+            const ws = XLSX.utils.aoa_to_sheet(summaryData);
+
+            // Apply formatting for currency/number columns (Col B, C, D, E)
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let R = range.s.r + 2; R <= range.e.r; ++R) { // Start from row 3 (index 2)
+                ['B', 'C', 'D', 'E'].forEach((col, idx) => {
+                    const cellRef = col + (R + 1);
+                    const cell = ws[cellRef];
+                    if (cell && typeof cell.v === 'number') {
+                        // Custom format to display as number or currency
+                        if (idx % 2 === 0) { // Count columns (B, D)
+                            cell.z = '#,##0';
+                        } else { // Amount columns (C, E)
+                            cell.z = '$#,##0.00';
+                        }
+                    }
+                });
+            }
+
+            // Set styles for headers and titles (not directly supported by sheetjs, but AOAs can be used to structure)
+            // A1: Title styling
+            if (ws['A1']) ws['A1'].s = { font: { sz: 14, bold: true }, fill: { fgColor: { rgb: "FFFFE0B2" } } };
+            // A2-E2: Header styling
+            if (ws['A2']) ws['A2'].s = { font: { bold: true }, fill: { fgColor: { rgb: "FFD9E1F2" } } };
+            
+            XLSX.utils.book_append_sheet(wb, ws, "Summary A & B Side By Side");
+        }
+
+        XLSX.writeFile(wb, "Reconciliation_Report_" + Date.now() + ".xlsx");
     };
 
     // --- Components ---
 
-    const FileUploadCard = ({ category, files, setFiles, availableColumns, setAvailableColumns, config, setConfig }) => {
-        const handleFileUpload = async (e) => {
-            const newFiles = Array.from(e.target.files);
-            if (newFiles.length === 0) return;
+    const SimpleSummaryDisplay = ({ results }) => {
+        const smA = results.summaryMetricsA;
+        const smB = results.summaryMetricsB;
 
-            setFiles(newFiles); // Replace for simplicity, or merge if allowing multiple files
-            
-            try {
-                const { headers } = await readWorkbook(newFiles[0]);
-                setAvailableColumns(headers.filter(h => !String(h).startsWith('__'))); // Filter out internal headers
-            } catch (e) {
-                console.error("Error extracting columns:", e);
-                // Clear files/columns on error
-                setFiles([]);
-                setAvailableColumns([]);
-                alert("Error reading file: " + e.message);
-            }
-        };
-
-        const handleRemoveFile = () => {
-            setFiles([]);
-            setAvailableColumns([]);
-            setConfig(prev => ({ ...prev, 
-                [`uniqueId${category}`]: '', 
-                [`amount${category}`]: '' 
-            }));
-        };
-
-        const uniqueIdKey = `uniqueId${category}`;
-        const amountKey = `amount${category}`;
+        const tableData = [
+            { 
+                label: "Matched Unique IDs", 
+                countA: smA.matchedCount, 
+                amountA: smA.matchedAmount,
+                countB: smB.matchedCount,
+                amountB: smB.matchedAmount,
+                isPrimary: true
+            },
+            { 
+                label: "Unmatched Unique IDs", 
+                countA: smA.unmatchedCount, 
+                amountA: smA.unmatchedAmount,
+                countB: smB.unmatchedCount,
+                amountB: smB.unmatchedAmount,
+                isPrimary: true
+            },
+            { 
+                label: "Total Distinct Unique IDs", 
+                countA: smA.totalDistinctCount, 
+                amountA: smA.totalDistinctAmount,
+                countB: smB.totalDistinctCount,
+                amountB: smB.totalDistinctAmount,
+                isPrimary: false
+            },
+        ];
 
         return (
-            <div className="flex-1 bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-                <h2 className="text-2xl font-semibold mb-4 text-gray-800">Category {category} File(s)</h2>
-                
-                {files.length === 0 ? (
-                    <div className="input-file-container w-full">
-                        <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-indigo-300 rounded-lg cursor-pointer bg-indigo-50 hover:bg-indigo-100 transition duration-200">
-                            <Upload className="text-indigo-500 mb-2" size={30} />
-                            <p className="text-indigo-600 font-medium">Click to upload Excel or CSV</p>
-                            <p className="text-sm text-gray-500">Only the first file's columns are used for configuration.</p>
-                            <input type="file" onChange={handleFileUpload} multiple accept=".xlsx,.xls,.csv" />
-                        </label>
-                    </div>
-                ) : (
-                    <div className="border border-green-300 bg-green-50 p-4 rounded-lg flex items-center justify-between">
-                        <div className="flex items-center">
-                            <FileSpreadsheet className="text-green-600 mr-3" size={24} />
-                            <span className="font-medium text-green-800">{files[0].name} ({files.length} file{files.length > 1 ? 's' : ''})</span>
-                        </div>
-                        <button 
-                            onClick={handleRemoveFile} 
-                            className="text-gray-400 hover:text-red-600 p-1 rounded-full transition"
-                        >
-                            <X size={18} />
-                        </button>
-                    </div>
-                )}
-                
-                {files.length > 0 && availableColumns.length > 0 && (
-                    <div className="mt-4 space-y-3">
-                        <ColumnSelect 
-                            label="Unique ID Column" 
-                            columns={availableColumns} 
-                            value={config[uniqueIdKey]} 
-                            onChange={(e) => setConfig(prev => ({ ...prev, [uniqueIdKey]: e.target.value }))}
-                            required={true}
-                        />
-                        <ColumnSelect 
-                            label="Amount Column" 
-                            columns={availableColumns} 
-                            value={config[amountKey]} 
-                            onChange={(e) => setConfig(prev => ({ ...prev, [amountKey]: e.target.value }))}
-                            required={true}
-                        />
-                    </div>
-                )}
+            <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200">
+                <div className="p-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="text-xl font-extrabold text-gray-800">Reconciliation Snapshot</h3>
+                    <p className="text-sm text-gray-500">Matched, Unmatched, and Total Distinct IDs (Excluding Duplicates)</p>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
+                            <tr>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Metric</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Count (A)</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount (A)</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Count (B)</th>
+                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount (B)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {tableData.map((row, index) => (
+                                <tr key={index} className={row.isPrimary ? 'bg-white hover:bg-yellow-50/50' : 'bg-gray-50 font-bold hover:bg-gray-100'}>
+                                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">{row.label}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-700 text-right">{formatNumber(row.countA)}</td>
+                                    <td className="px-4 py-3 text-sm text-green-700 font-mono text-right">{formatCurrency(row.amountA)}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-700 text-right">{formatNumber(row.countB)}</td>
+                                    <td className="px-4 py-3 text-sm text-green-700 font-mono text-right">{formatCurrency(row.amountB)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                <div className="p-3 bg-gray-50 border-t border-gray-200">
+                     <p className="text-xs text-gray-500 italic">This summary excludes duplicated items for a clean match/unmatch view. Duplicated data is available in the download report.</p>
+                </div>
             </div>
         );
     };
 
-    const ColumnSelect = ({ label, columns, value, onChange, required }) => (
-        <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-                {label} {required && <span className="text-red-500">*</span>}
+
+    const FileUpload = ({ label, onFileSelect, required, file, setFile }) => (
+        <div className="flex flex-col space-y-2">
+            <label className="text-sm font-medium text-gray-700 flex items-center">
+                <FileSpreadsheet size={16} className="mr-2" />
+                {label} {required && <span className="text-red-500 ml-1">*</span>}
             </label>
-            <div className="relative">
-                <select 
-                    value={value} 
-                    onChange={onChange} 
-                    required={required}
-                    className="appearance-none block w-full bg-white border border-gray-300 rounded-lg py-2 pl-3 pr-10 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+            <div className="flex items-center space-x-3">
+                <input
+                    type="file"
+                    id={`file-upload-${label.replace(/\s/g, '-')}`}
+                    onChange={onFileSelect}
+                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                    className="hidden"
+                />
+                <button
+                    onClick={() => document.getElementById(`file-upload-${label.replace(/\s/g, '-')}`).click()}
+                    className="px-4 py-2 border border-blue-400 bg-blue-50 text-blue-700 text-sm font-semibold rounded-lg hover:bg-blue-100 transition duration-150 flex items-center shadow-sm"
+                    type="button"
                 >
-                    <option value="" disabled>Select a column</option>
-                    {columns.map(col => (
-                        <option key={col} value={col}>{col}</option>
-                    ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                    <ChevronDown size={18} />
-                </div>
+                    <Upload size={18} className="mr-2" />
+                    {file ? 'Change File' : 'Select File'}
+                </button>
+                {file && (
+                    <span className="text-sm text-gray-600 truncate max-w-[200px] md:max-w-none">
+                        {file.name}
+                    </span>
+                )}
+                {file && (
+                    <button
+                        onClick={() => setFile(null)}
+                        className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition"
+                        title="Remove file"
+                        type="button"
+                    >
+                        <X size={16} />
+                    </button>
+                )}
             </div>
         </div>
     );
 
-    const SummaryTable = ({ metrics, category }) => {
-        const formatter = new Intl.NumberFormat('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        });
-
-        return (
-            <div className="bg-white p-4 rounded-lg shadow-md border border-gray-100">
-                <h4 className="text-lg font-bold mb-3 text-gray-700 border-b pb-2">{category} Metrics</h4>
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200 text-sm">
-                        {metrics.map((row, index) => {
-                            const isTotal = row.isTotal;
-                            const isCheck = row.isCheck;
-                            const className = row.isBlank ? 'h-3 bg-gray-50' : 
-                                isTotal ? 'font-bold bg-indigo-50 text-indigo-800' :
-                                isCheck && row.Count !== 0 ? 'font-bold bg-red-100 text-red-700' : 
-                                isCheck ? 'font-bold bg-green-100 text-green-700' : 
-                                'text-gray-600';
-
-                            return (
-                                <tr key={index} className={className}>
-                                    <td className="py-2 px-3 whitespace-nowrap">{row.Category}</td>
-                                    <td className="py-2 px-3 text-right whitespace-nowrap">
-                                        {row.Count !== null ? row.Count.toLocaleString() : ''}
-                                    </td>
-                                    <td className="py-2 px-3 text-right whitespace-nowrap">
-                                        {row.Amount !== null ? formatter.format(row.Amount) : ''}
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
-        );
-    };
-
-
     const ReconciliationApp = () => {
-        const [step, setStep] = useState(1);
-        const [categoryAFiles, setCategoryAFiles] = useState([]);
-        const [categoryBFiles, setCategoryBFiles] = useState([]);
-        const [columnConfig, setColumnConfig] = useState({
-            uniqueIdA: '',
-            uniqueIdB: '',
-            amountA: '',
-            amountB: ''
-        });
-        const [availableColumnsA, setAvailableColumnsA] = useState([]);
-        const [availableColumnsB, setAvailableColumnsB] = useState([]);
-        const [processing, setProcessing] = useState(false);
-        const [results, setResults] = useState(null);
+        const [fileA, setFileA] = useState(null);
+        const [fileB, setFileB] = useState(null);
+        const [step, setStep] = useState(1); // 1: Upload, 2: Loading, 3: Results
+        const [loadingMessage, setLoadingMessage] = useState('');
         const [error, setError] = useState(null);
+        const [results, setResults] = useState(null);
+        const [selectedDownloads, setSelectedDownloads] = useState(['matchedA', 'unmatchedA', 'duplicatedA', 'matchedB', 'unmatchedB', 'duplicatedB', 'summary']);
 
-        const allFilesUploaded = categoryAFiles.length > 0 && categoryBFiles.length > 0;
-        const allColumnsSelected = columnConfig.uniqueIdA && columnConfig.uniqueIdB && columnConfig.amountA && columnConfig.amountB;
+        const handleFileSelect = useCallback((e, setFile) => {
+            const file = e.target.files[0];
+            if (file) {
+                setFile(file);
+            }
+        }, []);
 
-        const handleStartReconciliation = async () => {
-            if (!allFilesUploaded || !allColumnsSelected) {
-                setError("Please upload both files and select all required columns.");
+        const handleReconcile = useCallback(async () => {
+            if (!fileA || !fileB) {
+                setError("Please upload both Category A and Category B files.");
                 return;
             }
-
-            setProcessing(true);
             setError(null);
             setResults(null);
+            setStep(2);
 
             try {
-                // Read all data from files
-                const fileA = categoryAFiles[0]; // Using only the first file for data extraction
-                const fileB = categoryBFiles[0];
-
-                const { records: recordsA } = await readWorkbook(fileA);
-                const { records: recordsB } = await readWorkbook(fileB);
-
-                if (recordsA.length === 0 || recordsB.length === 0) {
-                     throw new Error("One or both files contain no valid data records.");
-                }
-
-                // Execute the core reconciliation logic
-                const finalResults = doReconciliation(recordsA, recordsB, columnConfig);
+                setLoadingMessage('Parsing Category A data...');
+                const dataA = await processFile(fileA, 'A');
                 
-                setResults(finalResults);
-                setStep(3); // Move to results step
+                setLoadingMessage('Parsing Category B data...');
+                const dataB = await processFile(fileB, 'B');
+
+                setLoadingMessage('Running layered ID reconciliation...');
+                // Simulate a delay for complex calculation visualization
+                await new Promise(resolve => setTimeout(resolve, 500)); 
+                
+                const reconciliationResults = calculateReconciliation(dataA, dataB);
+                
+                setResults(reconciliationResults);
+                setStep(3);
+                setLoadingMessage('');
+
             } catch (err) {
                 console.error("Reconciliation Error:", err);
-                setError(`Reconciliation failed: ${err.message || "An unknown error occurred during processing."}`);
-            } finally {
-                setProcessing(false);
+                setError(err.message || "An unknown error occurred during reconciliation.");
+                setStep(1);
+                setLoadingMessage('');
             }
+        }, [fileA, fileB]);
+
+        const toggleDownloadSelection = (id) => {
+            setSelectedDownloads(prev => 
+                prev.includes(id) 
+                    ? prev.filter(item => item !== id) 
+                    : [...prev, id]
+            );
         };
 
+        const downloadIsDisabled = !results || selectedDownloads.length === 0;
 
-        // --- UI Rendering ---
+        const downloadOptions = [
+            { id: 'matchedA', label: 'Category A Matched (A-side data)' },
+            { id: 'unmatchedA', label: 'Category A Unmatched' },
+            { id: 'duplicatedA', label: 'Category A Duplicated IDs' },
+            { id: 'matchedB', label: 'Category B Matched (B-side data)' },
+            { id: 'unmatchedB', label: 'Category B Unmatched' },
+            { id: 'duplicatedB', label: 'Category B Duplicated IDs' },
+            { id: 'summary', label: 'Combined Summary Sheet' },
+        ];
 
-        const renderStep1 = () => (
-            <div className="space-y-6">
-                <h1 className="text-3xl font-extrabold text-gray-900 text-center">Step 1: Upload Files & Configure Columns</h1>
-                <div className="grid md:grid-cols-2 gap-6">
-                    <FileUploadCard 
-                        category="A" 
-                        files={categoryAFiles} 
-                        setFiles={setCategoryAFiles} 
-                        availableColumns={availableColumnsA} 
-                        setAvailableColumns={setAvailableColumnsA} 
-                        config={columnConfig} 
-                        setConfig={setColumnConfig}
-                    />
-                    <FileUploadCard 
-                        category="B" 
-                        files={categoryBFiles} 
-                        setFiles={setCategoryBFiles} 
-                        availableColumns={availableColumnsB} 
-                        setAvailableColumns={setAvailableColumnsB} 
-                        config={columnConfig} 
-                        setConfig={setColumnConfig}
-                    />
-                </div>
-                
-                {error && <div className="p-3 bg-red-100 text-red-700 rounded-lg flex items-center"><AlertCircle size={20} className="mr-2"/>{error}</div>}
 
-                <div className="flex justify-center pt-4">
-                    <button 
-                        onClick={handleStartReconciliation}
-                        disabled={!allFilesUploaded || !allColumnsSelected || processing}
-                        className={`px-8 py-3 text-lg font-semibold rounded-xl transition duration-300 ${
-                            !allFilesUploaded || !allColumnsSelected || processing 
-                            ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
-                            : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl'
-                        } flex items-center`}
-                    >
-                        {processing ? (
-                            <>
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                Processing Large Dataset...
-                            </>
-                        ) : (
-                            <>
-                                <CheckCircle size={24} className="mr-2"/>
-                                Start Reconciliation
-                            </>
-                        )}
-                    </button>
-                </div>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <p className="text-sm text-yellow-800 flex items-start">
-                        <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-yellow-600" />
-                        <span>
-                            The reconciliation key will be a **Composite ID** formed by combining the selected **Unique ID** and the **Amount** (rounded to 2 decimal places). This ensures an exact, one-to-one match.
-                        </span>
+        // Use a key to reset selectedDownloads when results change (e.g., new upload)
+        useEffect(() => {
+            if (results) {
+                 setSelectedDownloads(downloadOptions.map(o => o.id)); // Select all by default on successful result
+            }
+        }, [results]);
+
+
+        const header = (
+            <header className="py-6 bg-white border-b border-gray-200 shadow-sm">
+                <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <h1 className="text-3xl font-extrabold text-gray-900 flex items-center">
+                        <FileSpreadsheet size={30} className="text-indigo-600 mr-3" />
+                        Advanced Reconciliation Tool
+                    </h1>
+                    <p className="mt-1 text-sm text-gray-500">
+                        Layered ID extraction and two-category (A vs B) matching with detailed reporting.
                     </p>
                 </div>
-            </div>
+            </header>
         );
-
-        const renderStep3 = () => (
-            <div className="space-y-6">
-                <h1 className="text-3xl font-extrabold text-green-700 text-center">Step 2: Results & Download</h1>
-                <div className="max-w-4xl mx-auto">
-                    
-                    <div className="text-center mb-6">
-                        <button 
-                            onClick={() => generateExcelReport(results)}
-                            className="bg-green-600 text-white px-8 py-4 text-xl font-bold rounded-xl hover:bg-green-700 transition duration-300 shadow-lg flex items-center justify-center mx-auto"
-                        >
-                            <Download size={28} className="mr-3"/>
-                            Download Complete 7-Sheet Excel Report
-                        </button>
-                    </div>
-
-                    {/* Structured Summary Tables */}
-                    <div className="bg-gray-100 rounded-xl p-6 shadow-inner">
-                        <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Structured Summary</h3>
-                        <div className="grid lg:grid-cols-2 gap-6">
-                            {/* Category A Summary */}
-                            <SummaryTable metrics={results.summaryMetricsA} category="Category A" />
-                            
-                            {/* Category B Summary */}
-                            <SummaryTable metrics={results.summaryMetricsB} category="Category B" />
-                        </div>
-                    </div>
-
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
-                        <p className="text-sm text-blue-800 flex items-start">
-                            <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-blue-600" />
-                            <span>
-                                **Traceability Note:** The downloaded report includes essential metadata columns: **`__Composite_ID`**, **`__Source_File`**, **`__Original_Row_Index`**, and **`__Appearance_Count`**. The report contains sheets for: **Summary**, **Matched (A & B)**, **Unmatched A**, **Unmatched B**, **Duplicated ID - A**, and **Duplicated ID - B**.
-                            </span>
-                        </p>
-                    </div>
-                    <div className="text-center pt-6">
-                        <button 
-                            onClick={() => { setStep(1); setResults(null); setCategoryAFiles([]); setCategoryBFiles([]); setAvailableColumnsA([]); setAvailableColumnsB([]); setColumnConfig({uniqueIdA: '', uniqueIdB: '', amountA: '', amountB: ''});}}
-                            className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
-                        >
-                            Start New Reconciliation
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-
 
         return (
-            <div className="min-h-screen p-8">
-                <div className="max-w-6xl mx-auto">
-                    <header className="text-center mb-10 p-6 bg-white rounded-xl shadow-md">
-                        <h1 className="text-4xl font-black text-indigo-700">Advanced Transaction Reconciler</h1>
-                        <p className="text-gray-500 mt-2">Reconcile large datasets with full traceability and detailed summary reports.</p>
-                    </header>
-                    
-                    <div className="bg-white p-8 rounded-xl shadow-2xl">
-                        {step === 1 && renderStep1()}
-                        {step === 3 && results && renderStep3()}
-                    </div>
+            <div className="min-h-screen bg-gray-50">
+                {header}
+                <div className="max-w-6xl mx-auto py-8 sm:px-6 lg:px-8">
+                    {/* Error Message Display */}
+                    {error && (
+                        <div className="mb-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded-lg flex items-center">
+                            <X size={20} className="mr-3 flex-shrink-0" />
+                            <p className="font-semibold">Error: {error}</p>
+                        </div>
+                    )}
+
+                    {/* Step 1: Upload Files */}
+                    {step === 1 && (
+                        <div className="bg-white shadow-xl rounded-xl p-8 space-y-6 border border-gray-200">
+                            <h2 className="text-2xl font-bold text-gray-800 border-b pb-3 mb-4">Step 1: Upload Files</h2>
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <FileUpload 
+                                    label="Category A File (e.g., General Ledger)" 
+                                    onFileSelect={(e) => handleFileSelect(e, setFileA)}
+                                    required={true}
+                                    file={fileA}
+                                    setFile={setFileA}
+                                />
+                                <FileUpload 
+                                    label="Category B File (e.g., Bank Statement)" 
+                                    onFileSelect={(e) => handleFileSelect(e, setFileB)}
+                                    required={true}
+                                    file={fileB}
+                                    setFile={setFileB}
+                                />
+                            </div>
+                            <div className="pt-4 border-t">
+                                <button
+                                    onClick={handleReconcile}
+                                    disabled={!fileA || !fileB}
+                                    className={`w-full px-6 py-3 font-semibold rounded-lg transition duration-200 flex items-center justify-center ${
+                                        (fileA && fileB) ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <Check size={20} className="mr-2" />
+                                    Run Reconciliation
+                                </button>
+                                <p className="mt-3 text-xs text-gray-500 text-center">
+                                    Files must contain 'Narration', 'Debit', 'Credit', and 'UniqueRef' columns.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Step 2: Loading State */}
+                    {step === 2 && (
+                        <div className="bg-white shadow-xl rounded-xl p-8 flex flex-col items-center justify-center space-y-4 border border-gray-200">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                            <p className="text-lg font-semibold text-indigo-600">Processing...</p>
+                            <p className="text-gray-500">{loadingMessage}</p>
+                        </div>
+                    )}
+
+                    {/* Step 3: Results Display */}
+                    {step === 3 && results && (
+                        <div className="space-y-8">
+                            
+                            {/* Simple Summary Table (Requirement: Matched, Unmatched, Total side-by-side) */}
+                            <SimpleSummaryDisplay results={results} />
+
+                            {/* Download Selection and Button */}
+                            <div className="bg-white shadow-xl rounded-xl p-6 border border-gray-200 space-y-4">
+                                <h3 className="text-xl font-bold text-gray-800">Step 2: Download Reports</h3>
+                                <p className="text-sm text-gray-600">Select the detailed reports you wish to include in the final Excel file. The file will contain one sheet per selected item.</p>
+                                
+                                {/* Checkbox Grid for Selection */}
+                                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                    {downloadOptions.map((option) => (
+                                        <label key={option.id} className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedDownloads.includes(option.id)}
+                                                onChange={() => toggleDownloadSelection(option.id)}
+                                                className="form-checkbox h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                            />
+                                            <span className={`transition duration-150 ${selectedDownloads.includes(option.id) ? 'font-semibold' : 'font-normal'}`}>{option.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+
+
+                                <button
+                                    onClick={() => downloadReport(results, selectedDownloads)}
+                                    disabled={downloadIsDisabled}
+                                    className={`w-full px-6 py-3 font-bold rounded-lg transition duration-200 flex items-center justify-center shadow-lg ${
+                                        !downloadIsDisabled ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <FileDown size={20} className="mr-2" />
+                                    Download ({selectedDownloads.length}) Report{selectedDownloads.length !== 1 ? 's' : ''} as Excel File
+                                </button>
+                            </div>
+                            
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <p className="text-sm text-blue-800 flex items-start">
+                                    <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-blue-600" />
+                                    <span>
+                                        **Traceability Note:** All downloaded data sheets include essential metadata like **`Composite_ID`** (the match key), **`Source_File`**, and **`Original_Row_Index`** (for the exact row number in the source file) to help you trace the transaction back to its origin.
+                                    </span>
+                                </p>
+                            </div>
+                            <div className="text-center pt-4">
+                                <button 
+                                    onClick={() => setStep(1)} 
+                                    className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
+                                >
+                                    Start New Reconciliation
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         );
