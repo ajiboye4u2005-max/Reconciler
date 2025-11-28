@@ -69,7 +69,12 @@
                             sheetName = workbook.SheetNames[0];
                         }
 
+                        if (!workbook || !workbook.Sheets[sheetName]) {
+                             return reject('Workbook or Sheet not found after reading file: ' + file.name);
+                        }
+
                         const worksheet = workbook.Sheets[sheetName];
+                        // Read all rows into an array of arrays
                         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
                         // Extract headers from the first row (index 0)
@@ -97,9 +102,11 @@
                             const chunk = dataRows.slice(i, i + ${CHUNK_SIZE});
                             
                             chunk.forEach(row => {
+                                // IMPORTANT: Use String() conversion and trim to handle IDs that might be numeric or empty in the source
                                 const originalId = String(row[idColIndex] || '').trim();
                                 const originalAmount = parseFloat(row[amountColIndex]) || 0;
                                 
+                                // Only process rows with a non-empty ID and non-zero amount
                                 if (originalId && originalAmount !== 0) {
                                     consolidatedData.push({
                                         Unique_ID_Original: originalId,
@@ -348,7 +355,7 @@
             };
 
             newWorker.onerror = (e) => {
-                // Fixed the template literal issue on this line by using string concatenation instead of backticks
+                // Fixed template literal issue
                 setError('Worker Error: ' + e.message);
                 setProcessing(false);
             };
@@ -374,8 +381,8 @@
             return new Promise((resolve) => {
                 const reader = new FileReader();
                 
-                // Read only a small slice of the file to get headers quickly
-                const slice = file.slice(0, 1024 * 1024); // First 1MB
+                // Read only a small slice of the file (first 1MB) to get headers quickly
+                const slice = file.slice(0, 1024 * 1024); 
                 
                 reader.onload = (e) => {
                     try {
@@ -384,33 +391,61 @@
                         let headers = [];
                         
                         if (file.name.toLowerCase().endsWith('.csv')) {
-                            // Quick read for CSV header
-                            const firstLine = new TextDecoder('utf-8').decode(data).split('\n')[0];
-                            headers = firstLine.split(',').map(h => h.trim().replace(/"/g, ''));
+                            // For CSV, decode text and use SheetJS to get uniform results
+                            const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
+                            workbook = XLSX.read(text, { type: 'string' });
                         } else {
-                            // Read binary (XLSX/XLS) header
+                            // For binary formats (XLSX, XLS), read as ArrayBuffer
                             const binary = new Uint8Array(data);
                             workbook = XLSX.read(binary, { type: 'array' });
-                            const sheetName = workbook.SheetNames[0];
-                            const worksheet = workbook.Sheets[sheetName];
-                            
-                            // Use XLSX utility to get header range (e.g., A1:Z1)
-                            const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 'A1:Z1' });
-                            headers = json[0] || [];
                         }
+
+                        if (!workbook || workbook.SheetNames.length === 0) {
+                             console.error("SheetJS failed to create workbook from file slice:", file.name);
+                             setError("File seems corrupted or empty. Cannot read workbook.");
+                             resolve([]);
+                             return;
+                        }
+
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
                         
-                        // Filter out undefined/null headers
-                        const validHeaders = headers.filter(h => h && typeof h === 'string');
+                        // Use sheet_to_json with header: 1 to get data as an array of arrays, 
+                        // where the first element is the header row.
+                        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                        
+                        // Check if headers exist (i.e., the first row)
+                        headers = json[0] || [];
+                        
+                        // Filter out undefined/null headers, convert to string
+                        const validHeaders = headers
+                            .map(h => String(h).trim())
+                            .filter(h => h && h.length > 0);
+                        
+                        if (validHeaders.length === 0) {
+                             console.error("No valid headers found in the first row of file:", file.name);
+                             setError("No valid headers found. Ensure the first row contains headers.");
+                             resolve([]);
+                             return;
+                        }
+
                         setColumns(validHeaders);
                         resolve(validHeaders);
 
                     } catch (e) {
-                        console.error("Header extraction error:", e);
-                        setError("Error reading file headers. Is it a valid Excel/CSV?");
+                        console.error("Header extraction fatal error:", e);
+                        setError("Error reading file headers. Is it a valid Excel/CSV? Check console for details.");
                         resolve([]);
                     }
                 };
                 
+                reader.onerror = (e) => {
+                    console.error("FileReader error:", e);
+                    setError("Failed to read file from disk. Try a different file.");
+                    resolve([]);
+                };
+
+                // Read file as ArrayBuffer for consistent handling by SheetJS
                 reader.readAsArrayBuffer(slice);
             });
         };
@@ -422,6 +457,7 @@
             
             if (category === 'A') {
                 setCategoryAFiles(prev => [...prev, ...files]);
+                // Only extract headers if no files were previously loaded, or if the column list is empty
                 if (files.length > 0 && availableColumnsA.length === 0) {
                     await extractColumns(files[0], setAvailableColumnsA);
                 }
@@ -737,7 +773,7 @@
                             <div className="flex justify-center mt-10">
                                 <button
                                     onClick={handleConfigSubmit}
-                                    disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || !columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB}
+                                    disabled={categoryAFiles.length === 0 || categoryBFiles.length === 0 || !columnConfig.uniqueIdA || !columnConfig.uniqueIdB || !columnConfig.amountA || !columnConfig.amountB || availableColumnsA.length === 0 || availableColumnsB.length === 0}
                                     className="px-8 py-3 text-lg font-semibold rounded-full text-white bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-xl disabled:bg-gray-400 disabled:cursor-not-allowed"
                                 >
                                     Proceed to Reconciliation (Step 2)
