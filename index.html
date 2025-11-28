@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Million Row Support)</title>
+    <title>Advanced Reconciliation Tool (Resilient Header Extraction)</title>
     <!-- React and Babel for component structure -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -30,10 +30,11 @@
     const X = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></IconWrapper>;
 
     const CHUNK_SIZE = 50000; // Define chunk size for processing data (50k rows per worker message)
+    // Increased slice size for header reading robustness (5MB)
+    const HEADER_SLICE_SIZE = 5 * 1024 * 1024; 
 
     // --- WEB WORKER SCRIPT ---
-    // The CHUNK_SIZE constant is injected using the template literal pattern: ${CHUNK_SIZE}
-    // All internal string constructions use simple concatenation to avoid syntax errors.
+    // This script contains the logic for reading the *entire* file and running reconciliation
     const workerScript = `
         // Import the SheetJS library into the worker context
         importScripts('https://unpkg.com/xlsx/dist/xlsx.full.min.js');
@@ -55,9 +56,11 @@
                         const data = e.target.result;
                         let workbook;
                         let sheetName;
-                        let options = { type: 'binary' };
 
-                        if (file.name.toLowerCase().endsWith('.csv')) {
+                        const fileNameLower = file.name.toLowerCase();
+                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt');
+
+                        if (isTextFile) {
                             // For CSV, decode the ArrayBuffer to text and then read
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
                             workbook = XLSX.read(text, { type: 'string' });
@@ -65,12 +68,11 @@
                         } else {
                             // For binary formats (XLSX, XLS), convert ArrayBuffer to binary string
                             const binary = fixdata(data);
-                            workbook = XLSX.read(binary, options);
+                            workbook = XLSX.read(binary, { type: 'binary' });
                             sheetName = workbook.SheetNames[0];
                         }
 
                         if (!workbook || !workbook.Sheets[sheetName]) {
-                             // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
                              return reject('Workbook or Sheet not found after reading file: ' + file.name);
                         }
 
@@ -89,7 +91,6 @@
                         const amountColIndex = headers.indexOf(amountColHeader);
 
                         if (idColIndex === -1 || amountColIndex === -1) {
-                            // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
                             return reject('Required column \\'' + idColHeader + '\\' or \\'' + amountColHeader + '\\' not found in file: ' + file.name);
                         }
 
@@ -138,7 +139,7 @@
                 
                 reader.onerror = (e) => reject(e.target.error);
 
-                // Read file as ArrayBuffer for both binary and CSV (CSV will be decoded later)
+                // Read entire file as ArrayBuffer for both binary and CSV (CSV will be decoded later)
                 reader.readAsArrayBuffer(file);
             });
         };
@@ -155,7 +156,6 @@
             });
             
             // 2. Generate Composite IDs and create indexed maps
-            const dfA_map = new Map();
             const dfB_map = new Map();
 
             // Function to process and index a category
@@ -168,16 +168,16 @@
                     counter[id] = (counter[id] || 0) + 1;
                     
                     item.Match_Serial_No = counter[id];
-                    // FIX: Use simple concatenation to construct Composite_ID
+                    // Use simple concatenation to construct Composite_ID
                     item.Composite_ID = id + '_' + item.Match_Serial_No;
                     item.Appearance_Count = appearanceCounts[id]; // Use global count for final report
                     
-                    map.set(item.Composite_ID, item);
+                    if (map) map.set(item.Composite_ID, item);
                 });
                 return data;
             };
 
-            const dfA = processCategory(dataA, dfA_map);
+            const dfA = processCategory(dataA);
             const dfB = processCategory(dataB, dfB_map);
 
             // 3. Perform Reconciliation (simulating outer join)
@@ -272,7 +272,6 @@
                         allDataA.push(...data);
                         data.length = 0; // Explicitly clear data
                     }
-                    // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
                     postMessage({ type: 'status', message: 'Finished consolidating ' + allDataA.length.toLocaleString() + ' rows for Category A.' });
                     
                     // Step 2: Read and consolidate files for Category B
@@ -282,7 +281,6 @@
                         allDataB.push(...data);
                         data.length = 0; // Explicitly clear data
                     }
-                    // FIXED SYNTAX ERROR: Ensure proper quotes around string concatenation
                     postMessage({ type: 'status', message: 'Finished consolidating ' + allDataB.length.toLocaleString() + ' rows for Category B. Starting reconciliation...' });
 
                     // Step 3: Run Reconciliation
@@ -390,23 +388,25 @@
         };
 
         // --- STEP 1: EARLY DATA VALIDATION (Headers Only) ---
-        // FIX: Ensured consistent parsing of file slice to ArrayBuffer, 
-        // and correct decoding/parsing for CSV files within the slice routine.
+        // Enhanced robustness for header extraction using a larger slice.
         const extractColumns = async (file, setColumns) => {
             setError(null);
             return new Promise((resolve) => {
                 const reader = new FileReader();
                 
-                // Read only a slice of the file (1MB) to get headers quickly
-                const slice = file.slice(0, 1024 * 1024); 
+                // Read a larger slice (5MB) of the file to reliably get headers, even for complex XLSX structures.
+                const slice = file.slice(0, HEADER_SLICE_SIZE); 
                 
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
                         let workbook;
-                        let options = { type: 'binary' };
+
+                        const fileNameLower = file.name.toLowerCase();
+                        // Detect if it's a CSV based on file name or if the file size is very small (heuristic for non-xlsx)
+                        const isTextFile = fileNameLower.endsWith('.csv') || fileNameLower.endsWith('.txt') || file.type.includes('text/csv');
                         
-                        if (file.name.toLowerCase().endsWith('.csv')) {
+                        if (isTextFile) {
                             // For CSV, decode the ArrayBuffer slice to text
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
                             // Read as string type for CSV/TXT
@@ -414,7 +414,7 @@
                         } else {
                             // For binary formats (XLSX, XLS), convert ArrayBuffer slice to binary string
                             const binary = fixdata(data);
-                            workbook = XLSX.read(binary, options);
+                            workbook = XLSX.read(binary, { type: 'binary' });
                         }
 
                         if (!workbook || workbook.SheetNames.length === 0) {
@@ -452,7 +452,7 @@
                     } catch (e) {
                         console.error("Header extraction fatal error:", e);
                         // Provide a more specific error message based on common issues
-                        setError(`Error reading file headers. Please ensure the file (or first 1MB) is a valid Excel/CSV with headers in the first row. Details: ${e.message}`);
+                        setError(`Error reading file headers. Please ensure the file (or first 5MB) is a valid Excel/CSV with headers in the first row. Details: ${e.message}`);
                         resolve([]);
                     }
                 };
