@@ -55,17 +55,17 @@
                         const data = e.target.result;
                         let workbook;
                         let sheetName;
+                        let options = { type: 'binary' };
 
                         if (file.name.toLowerCase().endsWith('.csv')) {
-                            // For CSV, read as text and parse using XLSX.read
-                            const csvData = new Uint8Array(data);
-                            const text = new TextDecoder('utf-8').decode(csvData);
+                            // For CSV, decode the ArrayBuffer to text and then read
+                            const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
                             workbook = XLSX.read(text, { type: 'string' });
                             sheetName = workbook.SheetNames[0];
                         } else {
-                            // For binary formats (XLSX, XLS), read as ArrayBuffer
+                            // For binary formats (XLSX, XLS), convert ArrayBuffer to binary string
                             const binary = fixdata(data);
-                            workbook = XLSX.read(binary, { type: 'binary' });
+                            workbook = XLSX.read(binary, options);
                             sheetName = workbook.SheetNames[0];
                         }
 
@@ -367,38 +367,54 @@
 
         const removeFile = (fileToRemove, category) => {
             if (category === 'A') {
-                setCategoryAFiles(prev => prev.filter(file => file !== fileToRemove));
+                const newFiles = categoryAFiles.filter(file => file !== fileToRemove);
+                setCategoryAFiles(newFiles);
                 // Clear columns if no files remain
-                if (categoryAFiles.length === 1 && availableColumnsA.length > 0) setAvailableColumnsA([]);
+                if (newFiles.length === 0) setAvailableColumnsA([]);
+                // If files still remain, re-extract columns from the first file to update dropdowns
+                else if (availableColumnsA.length > 0) extractColumns(newFiles[0], setAvailableColumnsA);
             } else {
-                setCategoryBFiles(prev => prev.filter(file => file !== fileToRemove));
-                // Clear columns if no files remain
-                if (categoryBFiles.length === 1 && availableColumnsB.length > 0) setAvailableColumnsB([]);
+                const newFiles = categoryBFiles.filter(file => file !== fileToRemove);
+                setCategoryBFiles(newFiles);
+                if (newFiles.length === 0) setAvailableColumnsB([]);
+                else if (availableColumnsB.length > 0) extractColumns(newFiles[0], setAvailableColumnsB);
             }
         };
 
+        // Helper function for ArrayBuffer to Binary String conversion (Needed for SheetJS)
+        const fixdata = (data) => {
+            let o = "", l = 0, w = 10240;
+            for(; l<data.byteLength/w; ++l) o+=String.fromCharCode.apply(null,new Uint8Array(data.slice(l*w,l*w+w)));
+            o+=String.fromCharCode.apply(null, new Uint8Array(data.slice(l*w)));
+            return o;
+        };
+
         // --- STEP 1: EARLY DATA VALIDATION (Headers Only) ---
+        // FIX: Ensured consistent parsing of file slice to ArrayBuffer, 
+        // and correct decoding/parsing for CSV files within the slice routine.
         const extractColumns = async (file, setColumns) => {
+            setError(null);
             return new Promise((resolve) => {
                 const reader = new FileReader();
                 
-                // Read only a small slice of the file (first 1MB) to get headers quickly
+                // Read only a slice of the file (1MB) to get headers quickly
                 const slice = file.slice(0, 1024 * 1024); 
                 
                 reader.onload = (e) => {
                     try {
                         const data = e.target.result;
                         let workbook;
-                        let headers = [];
+                        let options = { type: 'binary' };
                         
                         if (file.name.toLowerCase().endsWith('.csv')) {
-                            // For CSV, decode text and use SheetJS to get uniform results
+                            // For CSV, decode the ArrayBuffer slice to text
                             const text = new TextDecoder('utf-8').decode(new Uint8Array(data));
+                            // Read as string type for CSV/TXT
                             workbook = XLSX.read(text, { type: 'string' });
                         } else {
-                            // For binary formats (XLSX, XLS), read as ArrayBuffer
-                            const binary = new Uint8Array(data);
-                            workbook = XLSX.read(binary, { type: 'array' });
+                            // For binary formats (XLSX, XLS), convert ArrayBuffer slice to binary string
+                            const binary = fixdata(data);
+                            workbook = XLSX.read(binary, options);
                         }
 
                         if (!workbook || workbook.SheetNames.length === 0) {
@@ -435,7 +451,8 @@
 
                     } catch (e) {
                         console.error("Header extraction fatal error:", e);
-                        setError("Error reading file headers. Is it a valid Excel/CSV? Check console for details.");
+                        // Provide a more specific error message based on common issues
+                        setError(`Error reading file headers. Please ensure the file (or first 1MB) is a valid Excel/CSV with headers in the first row. Details: ${e.message}`);
                         resolve([]);
                     }
                 };
@@ -446,7 +463,7 @@
                     resolve([]);
                 };
 
-                // Read file as ArrayBuffer for consistent handling by SheetJS
+                // Read file as ArrayBuffer for consistent handling of the file slice across formats
                 reader.readAsArrayBuffer(slice);
             });
         };
@@ -457,15 +474,17 @@
             const files = Array.from(e.target.files);
             
             if (category === 'A') {
-                setCategoryAFiles(prev => [...prev, ...files]);
-                // Only extract headers if no files were previously loaded, or if the column list is empty
-                if (files.length > 0 && availableColumnsA.length === 0) {
-                    await extractColumns(files[0], setAvailableColumnsA);
+                const newFiles = [...categoryAFiles, ...files];
+                setCategoryAFiles(newFiles);
+                // Only extract headers if the column list is currently empty
+                if (availableColumnsA.length === 0 && newFiles.length > 0) {
+                    await extractColumns(newFiles[0], setAvailableColumnsA);
                 }
             } else {
-                setCategoryBFiles(prev => [...prev, ...files]);
-                if (files.length > 0 && availableColumnsB.length === 0) {
-                    await extractColumns(files[0], setAvailableColumnsB);
+                const newFiles = [...categoryBFiles, ...files];
+                setCategoryBFiles(newFiles);
+                if (availableColumnsB.length === 0 && newFiles.length > 0) {
+                    await extractColumns(newFiles[0], setAvailableColumnsB);
                 }
             }
             // Clear the input value so the same files can be re-uploaded if needed
@@ -739,10 +758,12 @@
                     {/* Error Alert */}
                     {error && (
                         <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg shadow-md flex items-center" role="alert">
-                            <AlertCircle className="w-5 h-5 mr-3" />
-                            <p className="font-semibold mr-2">Error:</p>
-                            <p className="text-sm">{error}</p>
-                            <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-800">
+                            <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
+                            <div className="flex flex-col">
+                                <p className="font-semibold mr-2">File Reading Error:</p>
+                                <p className="text-sm break-all">{error}</p>
+                            </div>
+                            <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-800 p-1">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
