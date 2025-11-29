@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Reconciliation Tool (Selective Download & Restricted Columns)</title>
+    <title>Advanced Reconciliation Tool (Selective Columns)</title>
     <!-- Load React and ReactDOM from CDN -->
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -33,687 +33,640 @@
     <div id="root"></div>
 
     <script type="text/babel">
-    // Destructure hooks from the global React object for easy access
+    // Destructure hooks from the global React object for easy access (FIX: addresses ReferenceError: useState is not defined)
     const { useState, useEffect, useCallback, useMemo } = React;
     
     // --- ICON PLACEHOLDERS (Replacing lucide-react imports for single-file HTML) ---
     const IconWrapper = ({ children, size = 20, className = '', color = 'currentColor' }) => (
         <span className={className} style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: color }}>{children}</span>
     );
-    const Upload = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></IconWrapper>;
-    const FileSpreadsheet = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h4"/><path d="M8 17h4"/><path d="M16 13h-2"/><path d="M16 17h-2"/></svg></IconWrapper>;
-    const Check = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></IconWrapper>;
-    const AlertTriangle = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg></IconWrapper>;
-    const Info = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></IconWrapper>;
+    const Upload = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-upload"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg></IconWrapper>;
+    const FileSpreadsheet = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-file-spreadsheet"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 12h8"/><path d="M8 16h8"/><path d="M8 20h8"/></svg></IconWrapper>;
+    const ListChecks = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-list-checks"><path d="m3 12 2 2 4-4"/><path d="M13 6H3"/><path d="M17 6H3"/><path d="M17 12H3"/><path d="M21 12H11"/><path d="M17 18H3"/><path d="M21 18H11"/></svg></IconWrapper>;
+    const Info = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></IconWrapper>;
+    const Download = (props) => <IconWrapper {...props}><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg></IconWrapper>;
 
-    // --- UTILITY FUNCTIONS ---
+    // --- UTILITIES ---
 
-    /**
-     * Converts an array of arrays (or array of objects) to a Worksheet object.
-     * @param {Array<Object>} data The data array.
-     * @param {Array<string>} headers Optional array of header strings.
-     * @returns {Object} A SheetJS worksheet object.
-     */
-    const arrayToSheet = (data, headers) => {
-        if (!data || data.length === 0) {
-            // Create a sheet with just headers if data is empty
-            return XLSX.utils.aoa_to_sheet([headers || []]);
-        }
+    // Constants for File Data Structure
+    const initialState = { name: null, headers: [], data: [], idCol: null, amountCol: null };
+    const MANDATORY_TRACEABILITY_COLUMNS = ['__Composite_ID', '__Source_File', '__Original_Row_Index', '__Appearance_Count'];
 
-        const ws = XLSX.utils.json_to_sheet(data, { header: headers });
-
-        // Apply basic column width adjustment for better readability
-        const colWidths = headers.map(header => ({
-            wch: Math.max(header.length, ...data.map(row => String(row[header] || '').length)) + 2
-        }));
-        ws['!cols'] = colWidths;
-
-        return ws;
+    // Utility to convert Array Buffer to Workbook
+    const processWorkbook = (data) => {
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        // Convert sheet to array of objects (JSON format)
+        const json = XLSX.utils.sheet_to_json(worksheet);
+        const headers = json.length > 0 ? Object.keys(json[0]) : [];
+        return { json, headers };
     };
 
-
-    // --- DATA STRUCTURES & CONFIGS ---
-
-    const initialState = {
-        name: null,
-        headers: [],
-        data: [], // Array of objects, each object is a row
-        idCol: null,
-        amountCol: null,
+    // Filters data rows to only include the specified columns
+    const filterDataByColumns = (data, columns) => {
+        return data.map(row => {
+            const newRow = {};
+            columns.forEach(col => {
+                if (row.hasOwnProperty(col)) {
+                    // Check if the property exists before copying
+                    newRow[col] = row[col];
+                }
+            });
+            return newRow;
+        });
     };
-
-    const REPORT_OPTIONS = [
-        { id: 'summary', name: 'Summary Report', fileName: 'Reconciliation_Summary_Report' },
-        { id: 'matchedA', name: 'Matched Records (Category A)', fileName: 'Matched_Category_A' },
-        { id: 'unmatchedA', name: 'Unmatched Records (Category A)', fileName: 'Unmatched_Category_A' },
-        { id: 'matchedB', name: 'Matched Records (Category B)', fileName: 'Matched_Category_B' },
-        { id: 'unmatchedB', name: 'Unmatched Records (Category B)', fileName: 'Unmatched_Category_B' },
-    ];
-
 
     // --- CORE LOGIC ---
 
-    /**
-     * Parses the uploaded Excel/CSV file data.
-     */
-    const parseData = (file, fileContents, categoryName) => {
-        const workbook = XLSX.read(fileContents, { type: 'binary', cellDates: true, cellNF: false, cellText: false });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
+    const reconcileData = (fileA, fileB, selectedReportColumns) => {
+        const mandatoryColumns = ['__Composite_ID', '__Source_File', '__Original_Row_Index', '__Appearance_Count'];
+        const allOutputColumns = [...mandatoryColumns, ...Array.from(selectedReportColumns)];
 
-        // Convert the worksheet to an array of objects
-        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
-        
-        if (data.length < 2) return { ...initialState, name: file.name };
+        const dataA = fileA.data;
+        const dataB = fileB.data;
 
-        // Assuming the first row is the header
-        const headers = data[0].map(h => String(h || '').trim());
-        const rowData = data.slice(1);
-
-        // Map data rows to objects using clean headers
-        const cleanData = rowData.map((row, index) => {
-            const rowObj = {};
-            headers.forEach((header, colIndex) => {
-                // Use a default key if header is empty
-                const key = header || `Column_${colIndex + 1}`;
-                rowObj[key] = row[colIndex];
-            });
-            // Add metadata for traceability
-            rowObj.__Source_File = file.name;
-            rowObj.__Original_Row_Index = index + 2; // +1 for 0-index to 1-index, +1 for header row
-            return rowObj;
-        }).filter(row => Object.values(row).some(v => v !== undefined && v !== null && String(v).trim() !== '')); // Filter empty rows
-
-        return {
-            name: file.name,
-            headers: headers.filter(h => h), // Only non-empty headers
-            data: cleanData,
-            idCol: null,
-            amountCol: null,
-        };
-    };
-
-    /**
-     * Runs the core reconciliation and aggregation logic.
-     * @param {Object} fileDataA Category A file data and config.
-     * @param {Object} fileDataB Category B file data and config.
-     * @returns {Object} Reconciliation results and summary metrics.
-     */
-    const runReconciliation = (fileDataA, fileDataB) => {
+        // 1. Create a consolidated key map for File A
         const mapA = new Map();
+        dataA.forEach((row, index) => {
+            // Composite key: ID value + Amount value (for double check)
+            const key = `${row[fileA.idCol]}_${row[fileA.amountCol]}`;
+            if (!mapA.has(key)) {
+                mapA.set(key, []);
+            }
+            mapA.get(key).push({
+                ...row,
+                '__Source_File': fileA.name,
+                '__Original_Row_Index': index + 2, // +2 for 1-based index and header row
+                '__Composite_ID': key,
+                '__Appearance_Count': 0 // Will be updated later
+            });
+        });
+
+        // 2. Create a consolidated key map for File B
         const mapB = new Map();
-        const amountColA = fileDataA.amountCol;
-        const amountColB = fileDataB.amountCol;
-
-        // --- 1. Populate Maps, Serialize IDs, and Calculate Consolidated Totals ---
-        
-        const consolidatedA = { count: fileDataA.data.length, amount: 0 };
-        fileDataA.data.forEach(row => {
-            const compositeId = String(row[fileDataA.idCol]).trim().toUpperCase(); // MODIFICATION 1: Serialize ID
-            if (mapA.has(compositeId)) {
-                mapA.get(compositeId).push(row);
-            } else {
-                mapA.set(compositeId, [row]);
+        dataB.forEach((row, index) => {
+            const key = `${row[fileB.idCol]}_${row[fileB.amountCol]}`;
+            if (!mapB.has(key)) {
+                mapB.set(key, []);
             }
-            const amount = parseFloat(row[amountColA]) || 0;
-            consolidatedA.amount += amount;
+            mapB.get(key).push({
+                ...row,
+                '__Source_File': fileB.name,
+                '__Original_Row_Index': index + 2,
+                '__Composite_ID': key,
+                '__Appearance_Count': 0
+            });
         });
-        
-        const consolidatedB = { count: fileDataB.data.length, amount: 0 };
-        fileDataB.data.forEach(row => {
-            const compositeId = String(row[fileDataB.idCol]).trim().toUpperCase(); // MODIFICATION 1: Serialize ID
-            if (mapB.has(compositeId)) {
-                mapB.get(compositeId).push(row);
-            } else {
-                mapB.set(compositeId, [row]);
+
+        // 3. Find Matches and Uniques
+        const matchedKeys = new Set();
+        const uniqueKeysA = new Set(mapA.keys());
+        const uniqueKeysB = new Set(mapB.keys());
+
+        // Identify keys present in both
+        for (const key of mapA.keys()) {
+            if (mapB.has(key)) {
+                matchedKeys.add(key);
+                uniqueKeysA.delete(key);
+                uniqueKeysB.delete(key);
             }
-            const amount = parseFloat(row[amountColB]) || 0;
-            consolidatedB.amount += amount;
-        });
+        }
 
-        // --- 2. Perform Matching and Generate Output Arrays ---
+        let matched = [];
+        let uniqueA = [];
+        let uniqueB = [];
 
-        const matchedA = [];
-        const matchedB = [];
-        const unmatchedA = [];
-        const unmatchedB = [];
+        // Process Matched records
+        for (const key of matchedKeys) {
+            const recordsA = mapA.get(key);
+            const recordsB = mapB.get(key);
+            const allRecords = [...recordsA, ...recordsB];
+            const appearanceCount = allRecords.length;
 
-        // Track matched IDs to handle them only once
-        const matchedIds = new Set();
-        
-        // Headers to keep for output (Category A)
-        const outputHeadersA = [fileDataA.idCol, amountColA, ...fileDataA.headers.filter(h => h !== fileDataA.idCol && h !== amountColA)];
-        const outputHeadersB = [fileDataB.idCol, amountColB, ...fileDataB.headers.filter(h => h !== fileDataB.idCol && h !== amountColB)];
-
-        // Helper to format output row with metadata
-        const formatRow = (row, compositeId, appearanceCount, isA) => {
-            const originalHeaders = isA ? outputHeadersA : outputHeadersB;
-            const outputRow = {};
-            
-            // Only include original columns
-            originalHeaders.forEach(header => {
-                outputRow[header] = row[header];
+            // Update Appearance Count and push to matched list
+            allRecords.forEach(record => {
+                matched.push({ ...record, '__Appearance_Count': appearanceCount });
             });
+        }
 
-            // Add new metadata columns
-            outputRow.__Composite_ID = compositeId;
-            outputRow.__Source_File = row.__Source_File;
-            outputRow.__Original_Row_Index = row.__Original_Row_Index;
-            outputRow.__Appearance_Count = appearanceCount;
-
-            return outputRow;
-        };
-
-
-        // A to B Matching
-        mapA.forEach((rowsA, compositeId) => {
-            const matchRowsB = mapB.get(compositeId);
-            
-            rowsA.forEach(rowA => {
-                const appearanceCount = rowsA.length;
-                const formattedRowA = formatRow(rowA, compositeId, appearanceCount, true);
-                
-                if (matchRowsB) {
-                    // Match found
-                    matchedA.push(formattedRowA);
-                    matchedIds.add(compositeId);
-                } else {
-                    // Unmatched
-                    unmatchedA.push(formattedRowA);
-                }
+        // Process Unique A records
+        for (const key of uniqueKeysA) {
+            const recordsA = mapA.get(key);
+            const appearanceCount = recordsA.length;
+            recordsA.forEach(record => {
+                uniqueA.push({ ...record, '__Appearance_Count': appearanceCount });
             });
-        });
+        }
 
-        // B to A Matching
-        mapB.forEach((rowsB, compositeId) => {
-            const matchRowsA = mapA.get(compositeId);
-            
-            rowsB.forEach(rowB => {
-                const appearanceCount = rowsB.length;
-                const formattedRowB = formatRow(rowB, compositeId, appearanceCount, false);
-
-                if (matchRowsA) {
-                    // Match found
-                    matchedB.push(formattedRowB);
-                    matchedIds.add(compositeId);
-                } else {
-                    // Unmatched
-                    unmatchedB.push(formattedRowB);
-                }
+        // Process Unique B records
+        for (const key of uniqueKeysB) {
+            const recordsB = mapB.get(key);
+            const appearanceCount = recordsB.length;
+            recordsB.forEach(record => {
+                uniqueB.push({ ...record, '__Appearance_Count': appearanceCount });
             });
-        });
+        }
 
-        // --- 3. Calculate Summary Metrics (MODIFICATION 6) ---
-        
-        const calculateMetrics = (data, amountCol) => {
-            const count = data.length;
-            const amount = data.reduce((sum, row) => sum + (parseFloat(row[amountCol]) || 0), 0);
-            return { count, amount };
-        };
+        // --- FILTERING AND FINAL OUTPUT ---
+        // Filter the datasets to include only the selected columns + mandatory ones
+        const finalMatched = filterDataByColumns(matched, allOutputColumns);
+        const finalUniqueA = filterDataByColumns(uniqueA, allOutputColumns);
+        const finalUniqueB = filterDataByColumns(uniqueB, allOutputColumns);
 
-        const metricsMatchedA = calculateMetrics(matchedA, amountColA);
-        const metricsUnmatchedA = calculateMetrics(unmatchedA, amountColA);
-        const metricsMatchedB = calculateMetrics(matchedB, amountColB);
-        const metricsUnmatchedB = calculateMetrics(unmatchedB, amountColB);
-
-
+        // Calculate Summary Metrics
         const summaryMetricsA = [
-            { metric: 'Consolidated Total', count: consolidatedA.count, amount: consolidatedA.amount, isTotal: true },
-            { metric: 'Matched', count: metricsMatchedA.count, amount: metricsMatchedA.amount },
-            { metric: 'Unmatched', count: metricsUnmatchedA.count, amount: metricsUnmatchedA.amount },
+            { label: `Total Records in ${fileA.name}`, value: dataA.length },
+            { label: `Matched Records from ${fileA.name}`, value: matched.filter(r => r.__Source_File === fileA.name).length },
+            { label: `Unique Records in ${fileA.name}`, value: uniqueA.length },
         ];
-
         const summaryMetricsB = [
-            { metric: 'Consolidated Total', count: consolidatedB.count, amount: consolidatedB.amount, isTotal: true },
-            { metric: 'Matched', count: metricsMatchedB.count, amount: metricsMatchedB.amount },
-            { metric: 'Unmatched', count: metricsUnmatchedB.count, amount: metricsUnmatchedB.amount },
+            { label: `Total Records in ${fileB.name}`, value: dataB.length },
+            { label: `Matched Records from ${fileB.name}`, value: matched.filter(r => r.__Source_File === fileB.name).length },
+            { label: `Unique Records in ${fileB.name}`, value: uniqueB.length },
         ];
-
-        // Structured Summary Output Data
-        const summaryData = [
-            {
-                Category: 'Category A',
-                Metric: 'Consolidated Total',
-                Count: consolidatedA.count,
-                Amount: consolidatedA.amount,
-            },
-            {
-                Category: 'Category A',
-                Metric: 'Matched',
-                Count: metricsMatchedA.count,
-                Amount: metricsMatchedA.amount,
-            },
-            {
-                Category: 'Category A',
-                Metric: 'Unmatched',
-                Count: metricsUnmatchedA.count,
-                Amount: metricsUnmatchedA.amount,
-            },
-            {
-                Category: 'Category B',
-                Metric: 'Consolidated Total',
-                Count: consolidatedB.count,
-                Amount: consolidatedB.amount,
-            },
-            {
-                Category: 'Category B',
-                Metric: 'Matched',
-                Count: metricsMatchedB.count,
-                Amount: metricsMatchedB.amount,
-            },
-            {
-                Category: 'Category B',
-                Metric: 'Unmatched',
-                Count: metricsUnmatchedB.count,
-                Amount: metricsUnmatchedB.amount,
-            },
-        ];
-        
-        // Define final headers for the data reports
-        const finalHeadersA = [...outputHeadersA, '__Composite_ID', '__Source_File', '__Original_Row_Index', '__Appearance_Count'];
-        const finalHeadersB = [...outputHeadersB, '__Composite_ID', '__Source_File', '__Original_Row_Index', '__Appearance_Count'];
-        const summaryHeaders = ['Category', 'Metric', 'Count', 'Amount'];
-
 
         return {
+            matched: finalMatched,
+            uniqueA: finalUniqueA,
+            uniqueB: finalUniqueB,
             summaryMetricsA,
             summaryMetricsB,
-            summaryData,
-            summaryHeaders,
-            matchedA: { data: matchedA, headers: finalHeadersA },
-            unmatchedA: { data: unmatchedA, headers: finalHeadersA },
-            matchedB: { data: matchedB, headers: finalHeadersB },
-            unmatchedB: { data: unmatchedB, headers: finalHeadersB },
         };
     };
 
-    /**
-     * Generates and downloads the selected reports as separate Excel files.
-     * (MODIFICATION 2: Separate Excel files)
-     */
-    const downloadReports = (results, selectedDownloads) => {
-        if (!selectedDownloads || selectedDownloads.length === 0) {
-            console.error("No reports selected for download.");
+    // Utility to download data as an Excel file
+    const downloadExcel = (data, filename) => {
+        if (!data || data.length === 0) {
+            console.error("No data to download.");
             return;
         }
-        
-        selectedDownloads.forEach(reportId => {
-            const reportConfig = REPORT_OPTIONS.find(r => r.id === reportId);
-            if (!reportConfig) return;
+        // Determine headers from the keys of the first object in the filtered data
+        const headers = Object.keys(data[0]);
 
-            const wb = XLSX.utils.book_new();
-            let data, headers;
+        // Convert the array of objects (data) to an array of arrays (AoA)
+        const aoa = [
+            headers,
+            ...data.map(row => headers.map(header => row[header]))
+        ];
 
-            switch (reportId) {
-                case 'summary':
-                    data = results.summaryData;
-                    headers = results.summaryHeaders;
-                    break;
-                case 'matchedA':
-                    data = results.matchedA.data;
-                    headers = results.matchedA.headers;
-                    break;
-                case 'unmatchedA':
-                    data = results.unmatchedA.data;
-                    headers = results.unmatchedA.headers;
-                    break;
-                case 'matchedB':
-                    data = results.matchedB.data;
-                    headers = results.matchedB.headers;
-                    break;
-                case 'unmatchedB':
-                    data = results.unmatchedB.data;
-                    headers = results.unmatchedB.headers;
-                    break;
-                default:
-                    return;
-            }
-
-            const ws = arrayToSheet(data, headers);
-            XLSX.utils.book_append_sheet(wb, ws, reportConfig.name);
-            
-            const now = new Date();
-            const timestamp = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${now.getSeconds().toString().padStart(2, '0')}`;
-            const filename = `${reportConfig.fileName}_${timestamp}.xlsx`;
-            
-            XLSX.writeFile(wb, filename);
-        });
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Report");
+        XLSX.writeFile(wb, `${filename}.xlsx`);
     };
-
 
     // --- REACT COMPONENTS ---
 
-    const FileUpload = ({ fileData, setFileData, category, categoryLabel, step }) => {
-        const fileInputRef = React.useRef(null);
-        
-        const handleFileChange = (e) => {
+    const FileUpload = ({ fileData, onFileChange, title, color }) => {
+        const handleFileRead = (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = (evt) => {
-                const contents = evt.target.result;
+            reader.onload = (event) => {
                 try {
-                    const parsed = parseData(file, contents, category);
-                    setFileData(parsed);
+                    const arrayBuffer = event.target.result;
+                    const { json, headers } = processWorkbook(arrayBuffer);
+                    
+                    if (json.length === 0) {
+                        alert(`File ${file.name} is empty or has no data rows.`);
+                        return;
+                    }
+
+                    onFileChange({ 
+                        name: file.name, 
+                        headers: headers, 
+                        data: json, 
+                        idCol: null, 
+                        amountCol: null 
+                    });
+
                 } catch (error) {
-                    console.error("Error parsing file:", error);
-                    alert(`Error processing ${file.name}: The file format may be invalid or corrupted.`);
-                    setFileData({ ...initialState, name: null }); // Reset state on error
+                    console.error("Error processing file:", error);
+                    alert(`Failed to process file. Ensure it is a valid Excel/CSV format.`);
                 }
             };
-            reader.onerror = (error) => {
-                console.error("File reader error:", error);
-                alert(`Failed to read ${file.name}.`);
-                setFileData({ ...initialState, name: null });
-            };
-            reader.readAsBinaryString(file);
+            reader.readAsArrayBuffer(file);
         };
 
-        const isConfigured = fileData.name && fileData.idCol && fileData.amountCol;
-
         return (
-            <div className={`p-6 border-2 rounded-xl transition duration-300 ${isConfigured ? 'border-green-400 bg-green-50 shadow-lg' : 'border-blue-200 bg-white shadow-md'}`}>
-                <h2 className="text-xl font-bold mb-4 text-gray-700 flex items-center">
+            <div className={`border-2 border-dashed ${color} rounded-xl p-6 transition duration-300 hover:shadow-lg bg-white`}>
+                <h2 className="text-xl font-bold mb-4 flex items-center text-gray-700">
                     <FileSpreadsheet size={24} className="mr-2 text-blue-500" />
-                    {categoryLabel}
+                    {title}
                 </h2>
-                
-                {fileData.name ? (
-                    <div className="space-y-3">
-                        <p className="font-semibold text-gray-800 break-words">File: <span className="text-blue-600">{fileData.name}</span></p>
-                        <p className="text-sm text-gray-600">Rows Loaded: {fileData.data.length}</p>
-                        <button 
-                            onClick={() => fileInputRef.current.click()} 
-                            className="text-sm text-blue-500 hover:text-blue-700 transition"
-                        >
-                            Change File
-                        </button>
-                    </div>
-                ) : (
-                    <div className="text-center">
-                        <input
-                            type="file"
-                            id={`file-upload-${category}`}
-                            ref={fileInputRef}
-                            onChange={handleFileChange}
-                            accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                            className="hidden"
-                        />
-                        <button
-                            onClick={() => fileInputRef.current.click()}
-                            className="w-full px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition duration-200 flex items-center justify-center"
-                            disabled={step !== 1}
-                        >
-                            <Upload size={20} className="mr-2" /> Upload File
-                        </button>
-                        <p className="mt-2 text-xs text-gray-500">Excel (.xlsx) or CSV files supported.</p>
-                    </div>
-                )}
-                
-                {fileData.name && (
-                    <div className="mt-6 pt-4 border-t border-gray-200 space-y-4">
-                        <div className="flex flex-col">
-                            <label htmlFor={`${category}-id-col`} className="text-sm font-medium text-gray-700 mb-1">
-                                Unique ID Column (Key for Match)
-                            </label>
-                            <select
-                                id={`${category}-id-col`}
-                                value={fileData.idCol || ''}
-                                onChange={(e) => setFileData(prev => ({ ...prev, idCol: e.target.value }))}
-                                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                            >
-                                <option value="" disabled>Select ID Column</option>
-                                {fileData.headers.map(header => (
-                                    <option key={header} value={header}>{header}</option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        <div className="flex flex-col">
-                            <label htmlFor={`${category}-amount-col`} className="text-sm font-medium text-gray-700 mb-1">
-                                Amount Column (For Aggregation)
-                            </label>
-                            <select
-                                id={`${category}-amount-col`}
-                                value={fileData.amountCol || ''}
-                                onChange={(e) => setFileData(prev => ({ ...prev, amountCol: e.target.value }))}
-                                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-                            >
-                                <option value="" disabled>Select Amount Column</option>
-                                {fileData.headers.map(header => (
-                                    <option key={header} value={header}>{header}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {isConfigured && (
-                            <p className="text-sm font-medium text-green-600 flex items-center">
-                                <Check size={16} className="mr-1" /> Ready for Reconciliation
-                            </p>
-                        )}
-                    </div>
-                )}
+                <input
+                    type="file"
+                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                    onChange={handleFileRead}
+                    className="hidden"
+                    id={`file-upload-${title}`}
+                />
+                <label
+                    htmlFor={`file-upload-${title}`}
+                    className="flex flex-col items-center justify-center p-6 border-2 border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition duration-150"
+                >
+                    <Upload size={32} className="text-gray-500 mb-2" />
+                    <span className="text-sm font-medium text-gray-600">
+                        {fileData.name ? `Loaded: ${fileData.name}` : `Click to Upload Excel/CSV`}
+                    </span>
+                    {fileData.name && (
+                        <span className="text-xs text-green-500 mt-1">
+                            {fileData.data.length.toLocaleString()} rows detected.
+                        </span>
+                    )}
+                </label>
             </div>
         );
     };
 
-    const SummaryTable = ({ metrics, category }) => {
-        const formatAmount = (amount) => {
-            return new Intl.NumberFormat('en-US', {
-                style: 'currency',
-                currency: 'USD',
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-            }).format(amount);
+    const ColumnSelector = ({ fileData, setFileData, type, label }) => {
+        const handleChange = (e) => {
+            setFileData(prev => ({ ...prev, [type]: e.target.value }));
         };
-        const formatCount = (count) => new Intl.NumberFormat('en-US').format(count);
 
         return (
-            <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
-                <h4 className="bg-gray-100 p-3 font-semibold text-gray-700 border-b">{category} Metrics</h4>
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Metric</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Count</th>
-                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {metrics.map((m, index) => (
-                            <tr key={index} className={m.isTotal ? 'bg-gray-100 font-bold' : ''}>
-                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{m.metric}</td>
-                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{formatCount(m.count)}</td>
-                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 text-right">{formatAmount(m.amount)}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+            <div className="flex flex-col">
+                <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
+                <select
+                    value={fileData[type] || ''}
+                    onChange={handleChange}
+                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md shadow-sm"
+                    disabled={fileData.headers.length === 0}
+                >
+                    <option value="" disabled>Select a Column</option>
+                    {fileData.headers.map(header => (
+                        <option key={header} value={header}>{header}</option>
+                    ))}
+                </select>
             </div>
         );
     };
 
+    const OutputColumnSelector = ({ allUniqueHeaders, selectedColumns, onToggleColumn }) => {
+        // Headers that are mandatory and not selectable, but shown for context
+        const mandatoryCols = MANDATORY_TRACEABILITY_COLUMNS;
+        
+        return (
+            <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
+                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                    <ListChecks size={24} className="mr-2 text-indigo-600" />
+                    Select Report Detail Columns
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                    Choose which additional columns from the source files should appear in the final **Matched** and **Unique** reports.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-60 overflow-y-auto p-2">
+                    {allUniqueHeaders.map(header => (
+                        <div key={header} className="flex items-center">
+                            <input
+                                id={`col-${header}`}
+                                type="checkbox"
+                                checked={selectedColumns.has(header)}
+                                onChange={() => onToggleColumn(header)}
+                                className="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                            />
+                            <label htmlFor={`col-${header}`} className="ml-2 text-sm text-gray-700 truncate" title={header}>
+                                {header}
+                            </label>
+                        </div>
+                    ))}
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-xs text-gray-500">
+                        *The following columns are **always** included for traceability: {mandatoryCols.join(', ')}
+                    </p>
+                </div>
+            </div>
+        );
+    };
+
+    const SummaryTable = ({ metrics, category }) => (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <h4 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">{category} Metrics</h4>
+            <dl className="space-y-2">
+                {metrics.map((metric, index) => (
+                    <div key={index} className="flex justify-between text-sm">
+                        <dt className="font-medium text-gray-600">{metric.label}</dt>
+                        <dd className="font-bold text-gray-800">{metric.value.toLocaleString()}</dd>
+                    </div>
+                ))}
+            </dl>
+        </div>
+    );
 
     const ReconciliationApp = () => {
-        const [step, setStep] = useState(1); // 1: Upload, 2: Running/Loading, 3: Results
+        const [step, setStep] = useState(1);
         const [fileDataA, setFileDataA] = useState(initialState);
         const [fileDataB, setFileDataB] = useState(initialState);
         const [results, setResults] = useState(null);
         const [isLoading, setIsLoading] = useState(false);
-        const [selectedDownloads, setSelectedDownloads] = useState(['summary']); // MODIFICATION 3: Default select summary
+        const [selectedDownloads, setSelectedDownloads] = useState(new Set(['matched', 'uniqueA', 'uniqueB']));
+        
+        // NEW STATE for column selection
+        const [selectedReportColumns, setSelectedReportColumns] = useState(new Set());
 
-        // Helper to check if both files are ready for reconciliation
-        const isReadyToRun = useMemo(() => (
-            fileDataA.name && fileDataA.idCol && fileDataA.amountCol &&
-            fileDataB.name && fileDataB.idCol && fileDataB.amountCol
-        ), [fileDataA, fileDataB]);
 
-        const handleRunReconciliation = useCallback(() => {
-            if (!isReadyToRun) return;
+        // Step 1: Upload Files
+        const isStep1Complete = fileDataA.data.length > 0 && fileDataB.data.length > 0;
+
+        // Step 2: Configure Columns
+        const isStep2Complete = fileDataA.idCol && fileDataA.amountCol && fileDataB.idCol && fileDataB.amountCol;
+
+        // Calculate all unique headers for the selector (excluding keys and amounts)
+        const allUniqueHeaders = useMemo(() => {
+            if (step !== 2 || !fileDataA.headers.length || !fileDataB.headers.length) return [];
+
+            const keysA = [fileDataA.idCol, fileDataA.amountCol].filter(Boolean);
+            const keysB = [fileDataB.idCol, fileDataB.amountCol].filter(Boolean);
+
+            const nonKeyHeadersA = fileDataA.headers.filter(h => !keysA.includes(h));
+            const nonKeyHeadersB = fileDataB.headers.filter(h => !keysB.includes(h));
+
+            const combinedHeaders = new Set([...nonKeyHeadersA, ...nonKeyHeadersB]);
+            
+            // Convert Set to Array for rendering
+            return Array.from(combinedHeaders);
+        }, [step, fileDataA, fileDataB]);
+
+        // Effect to initialize selectedReportColumns when headers change
+        useEffect(() => {
+            if (step === 2 && allUniqueHeaders.length > 0) {
+                 // Initialize with all unique non-key headers selected by default
+                setSelectedReportColumns(new Set(allUniqueHeaders));
+            }
+        }, [step, allUniqueHeaders]);
+
+
+        const handleRunReconciliation = useCallback(async () => {
+            if (!isStep2Complete) return;
 
             setIsLoading(true);
-            
-            // Use setTimeout to ensure the loading state updates and the UI doesn't freeze
-            setTimeout(() => {
-                try {
-                    const reconciliationResults = runReconciliation(fileDataA, fileDataB);
-                    setResults(reconciliationResults);
-                    setStep(3);
-                } catch (error) {
-                    console.error("Reconciliation Error:", error);
-                    alert("An error occurred during reconciliation. Please check your data and column selections.");
-                } finally {
-                    setIsLoading(false);
-                }
-            }, 50); // Small delay for UI thread
-        }, [isReadyToRun, fileDataA, fileDataB]);
-        
-        const handleSelectDownload = (id, checked) => {
+            // Simulate a delay for complex calculation
+            await new Promise(resolve => setTimeout(resolve, 50)); 
+
+            try {
+                // Pass the selected columns to the reconciliation logic
+                const newResults = reconcileData(fileDataA, fileDataB, selectedReportColumns);
+                setResults(newResults);
+                setStep(3);
+            } catch (error) {
+                console.error("Reconciliation error:", error);
+                alert("An error occurred during reconciliation. Check console for details.");
+            } finally {
+                setIsLoading(false);
+            }
+        }, [fileDataA, fileDataB, isStep2Complete, selectedReportColumns]);
+
+        const handleToggleDownload = (key) => {
             setSelectedDownloads(prev => {
-                if (checked) {
-                    return [...prev, id];
+                const newSet = new Set(prev);
+                if (newSet.has(key)) {
+                    newSet.delete(key);
                 } else {
-                    return prev.filter(item => item !== id);
+                    newSet.add(key);
+                }
+                return newSet;
+            });
+        };
+
+        const handleDownloadAll = () => {
+            if (!results || selectedDownloads.size === 0) return;
+
+            const downloads = {
+                'matched': { data: results.matched, name: 'Reconciliation_Matched' },
+                'uniqueA': { data: results.uniqueA, name: `Reconciliation_Unique_in_${fileDataA.name.split('.')[0]}` },
+                'uniqueB': { data: results.uniqueB, name: `Reconciliation_Unique_in_${fileDataB.name.split('.')[0]}` },
+            };
+
+            selectedDownloads.forEach(key => {
+                if (downloads[key] && downloads[key].data.length > 0) {
+                    downloadExcel(downloads[key].data, downloads[key].name);
                 }
             });
         };
 
-        const handleDownload = () => {
-            if (results && selectedDownloads.length > 0) {
-                downloadReports(results, selectedDownloads);
-            }
-        };
+        const handleToggleOutputColumn = useCallback((header) => {
+            setSelectedReportColumns(prev => {
+                const newSet = new Set(prev);
+                if (newSet.has(header)) {
+                    newSet.delete(header);
+                } else {
+                    newSet.add(header);
+                }
+                return newSet;
+            });
+        }, []);
+
 
         return (
-            <div className="container mx-auto p-4 md:p-8">
-                <header className="text-center mb-8">
-                    <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 tracking-tight">
-                        Advanced Data Reconciliation Tool
-                    </h1>
-                    <p className="text-gray-600 mt-2">Match transactions across two files using composite keys and generate segregated reports.</p>
+            <div className="max-w-7xl mx-auto p-6 relative">
+                <header className="py-6 mb-8 border-b border-gray-200">
+                    <h1 className="text-3xl font-extrabold text-gray-900">Advanced Reconciliation Tool</h1>
+                    <p className="text-gray-500 mt-1">Cross-reference two financial data files using a composite key (ID + Amount).</p>
                 </header>
 
-                <div className="relative max-w-4xl mx-auto bg-white p-6 md:p-10 rounded-xl shadow-2xl border border-gray-100">
-                    
-                    {/* Loading Overlay */}
+                <div className="bg-white rounded-xl shadow-2xl p-8 relative">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-semibold text-gray-800">
+                            Step {step}: {step === 1 ? "Upload Files" : step === 2 ? "Configure Matching Columns" : "Results & Download"}
+                        </h2>
+                        {step !== 3 && (
+                            <div className="flex space-x-2">
+                                <span className={`h-2 w-8 rounded-full ${step === 1 ? 'bg-blue-500' : 'bg-gray-300'}`}></span>
+                                <span className={`h-2 w-8 rounded-full ${step === 2 ? 'bg-blue-500' : 'bg-gray-300'}`}></span>
+                            </div>
+                        )}
+                    </div>
+
                     {isLoading && (
                         <div className="loading-overlay">
-                            <div className="flex flex-col items-center p-6 bg-white rounded-lg shadow-xl">
-                                <svg className="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <p className="mt-3 text-lg font-semibold text-gray-700">Running Reconciliation...</p>
-                                <p className="text-sm text-gray-500">Processing {fileDataA.data.length + fileDataB.data.length} total rows.</p>
+                            <div className="flex flex-col items-center">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-3"></div>
+                                <p className="text-lg font-medium text-blue-600">Running Reconciliation...</p>
                             </div>
                         </div>
                     )}
 
-                    {/* Step 1: File Upload and Column Selection */}
+                    {/* Step 1: Upload Files */}
                     {step === 1 && (
-                        <div className="space-y-8">
-                            <div className="grid md:grid-cols-2 gap-6">
-                                <FileUpload 
-                                    fileData={fileDataA} 
-                                    setFileData={setFileDataA} 
-                                    category="A" 
-                                    categoryLabel="Category A File (Base)" 
-                                    step={step}
-                                />
-                                <FileUpload 
-                                    fileData={fileDataB} 
-                                    setFileData={setFileDataB} 
-                                    category="B" 
-                                    categoryLabel="Category B File (Counterpart)"
-                                    step={step}
-                                />
+                        <div className="grid md:grid-cols-2 gap-8">
+                            <FileUpload 
+                                fileData={fileDataA} 
+                                onFileChange={setFileDataA} 
+                                title="File A (Primary Source)" 
+                                color="border-blue-300" 
+                            />
+                            <FileUpload 
+                                fileData={fileDataB} 
+                                onFileChange={setFileDataB} 
+                                title="File B (Reference Source)" 
+                                color="border-green-300" 
+                            />
+                            <div className="md:col-span-2 pt-4 flex justify-center">
+                                <button
+                                    onClick={() => setStep(2)}
+                                    disabled={!isStep1Complete}
+                                    className={`px-8 py-3 rounded-xl font-semibold text-white transition duration-200 ${isStep1Complete ? 'bg-blue-600 hover:bg-blue-700 shadow-md' : 'bg-gray-400 cursor-not-allowed'}`}
+                                >
+                                    Continue to Column Mapping
+                                </button>
                             </div>
+                        </div>
+                    )}
 
-                            <div className="text-center pt-4">
+                    {/* Step 2: Configure Columns */}
+                    {step === 2 && (
+                        <div className="space-y-8">
+                            {/* Key Column Selection */}
+                            <div className="grid md:grid-cols-2 gap-8 bg-gray-50 p-6 rounded-xl border border-gray-200">
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-700 mb-4">{fileDataA.name} Mapping</h3>
+                                    <div className="space-y-4">
+                                        <ColumnSelector 
+                                            fileData={fileDataA} 
+                                            setFileData={setFileDataA} 
+                                            type="idCol" 
+                                            label="Matching ID Column (e.g., Transaction Ref, Account No)" 
+                                        />
+                                        <ColumnSelector 
+                                            fileData={fileDataA} 
+                                            setFileData={setFileDataA} 
+                                            type="amountCol" 
+                                            label="Amount Column (e.g., Debit, Credit, Amount)" 
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-700 mb-4">{fileDataB.name} Mapping</h3>
+                                    <div className="space-y-4">
+                                        <ColumnSelector 
+                                            fileData={fileDataB} 
+                                            setFileData={setFileDataB} 
+                                            type="idCol" 
+                                            label="Matching ID Column (e.g., Transaction Ref, Account No)" 
+                                        />
+                                        <ColumnSelector 
+                                            fileData={fileDataB} 
+                                            setFileData={setFileDataB} 
+                                            type="amountCol" 
+                                            label="Amount Column (e.g., Debit, Credit, Amount)" 
+                                        />
+                                    </div>
+                                </div>
+                                <div className="md:col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                    <p className="text-sm text-blue-800 flex items-start">
+                                        <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-blue-600" />
+                                        <span>
+                                            Reconciliation will match rows only if both the **Matching ID** AND the **Amount** are identical across files.
+                                        </span>
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            {/* Output Column Selection (NEW SECTION) */}
+                            {allUniqueHeaders.length > 0 && (
+                                <OutputColumnSelector
+                                    allUniqueHeaders={allUniqueHeaders}
+                                    selectedColumns={selectedReportColumns}
+                                    onToggleColumn={handleToggleOutputColumn}
+                                />
+                            )}
+
+                            <div className="pt-4 flex justify-center">
                                 <button
                                     onClick={handleRunReconciliation}
-                                    disabled={!isReadyToRun || isLoading}
-                                    className={`px-8 py-3 font-bold text-lg rounded-xl transition duration-300 shadow-lg ${isReadyToRun ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                                    disabled={!isStep2Complete || isLoading || selectedReportColumns.size === 0}
+                                    className={`px-8 py-3 rounded-xl font-semibold text-white transition duration-200 ${isStep2Complete && !isLoading && selectedReportColumns.size > 0 ? 'bg-green-600 hover:bg-green-700 shadow-md' : 'bg-gray-400 cursor-not-allowed'}`}
                                 >
-                                    {isReadyToRun ? 'Run Reconciliation' : 'Select Files & Columns'}
+                                    Run Reconciliation
                                 </button>
-                                {!isReadyToRun && (
-                                    <p className="mt-3 text-sm text-red-500 flex items-center justify-center">
-                                        <AlertTriangle size={16} className="mr-1" />
-                                        Please upload both files and select the Unique ID and Amount columns.
-                                    </p>
-                                )}
                             </div>
                         </div>
                     )}
 
-                    {/* Step 3: Results and Download */}
+                    {/* Step 3: Results & Download */}
                     {step === 3 && results && (
                         <div>
-                            <div className="bg-green-100 p-4 rounded-lg mb-8 border border-green-300">
-                                <h2 className="text-2xl font-bold text-green-700 flex items-center">
-                                    <Check size={28} className="mr-2" /> Reconciliation Complete!
-                                </h2>
-                                <p className="text-green-600 mt-1">Results are summarized below. Select reports to download.</p>
-                            </div>
+                            <div className="space-y-6 mb-8">
+                                <h3 className="text-2xl font-bold text-green-700 flex items-center">
+                                    <Download size={24} className="mr-2"/> Reconciliation Complete!
+                                </h3>
 
-                            {/* Structured Summary Tables (MODIFICATION 6) */}
-                            <div className="bg-gray-50 rounded-xl p-6 mb-8 border border-gray-200">
-                                <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Reconciliation Summary</h3>
-                                <div className="grid md:grid-cols-2 gap-6">
-                                    {/* Category A Summary */}
-                                    <SummaryTable metrics={results.summaryMetricsA} category={`Category A (${fileDataA.name})`} />
-                                    
-                                    {/* Category B Summary */}
-                                    <SummaryTable metrics={results.summaryMetricsB} category={`Category B (${fileDataB.name})`} />
-                                </div>
-                            </div>
-                            
-                            {/* Download Selection (MODIFICATION 3) */}
-                            <div className="p-6 bg-blue-50 border border-blue-200 rounded-xl shadow-inner mb-8">
-                                <h3 className="font-bold text-xl text-blue-800 mb-3">Select Reports for Download</h3>
-                                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {REPORT_OPTIONS.map(option => (
-                                        <label key={option.id} className="flex items-center space-x-2 cursor-pointer p-2 bg-white rounded-lg shadow-sm hover:bg-gray-50 transition duration-150 border border-gray-200">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedDownloads.includes(option.id)}
-                                                onChange={(e) => handleSelectDownload(option.id, e.target.checked)}
-                                                className="form-checkbox h-5 w-5 text-indigo-600 rounded"
-                                            />
-                                            <span className="text-sm font-medium text-gray-700">{option.name}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                                <div className="mt-6 text-center">
-                                    <button 
-                                        onClick={handleDownload}
-                                        disabled={selectedDownloads.length === 0}
-                                        className={`px-8 py-3 font-bold text-white rounded-xl shadow-lg transition duration-300 ${selectedDownloads.length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'}`}
+                                {/* Download Options */}
+                                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-md">
+                                    <h4 className="text-lg font-semibold text-gray-700 mb-4">Select Reports to Download</h4>
+                                    <div className="grid sm:grid-cols-3 gap-4 mb-4">
+                                        {Object.entries({
+                                            'matched': { label: 'Matched Records', count: results.matched.length, color: 'text-blue-600' },
+                                            'uniqueA': { label: `Unique in ${fileDataA.name}`, count: results.uniqueA.length, color: 'text-red-600' },
+                                            'uniqueB': { label: `Unique in ${fileDataB.name}`, count: results.uniqueB.length, color: 'text-red-600' },
+                                        }).map(([key, { label, count, color }]) => (
+                                            <label 
+                                                key={key} 
+                                                className={`flex items-center p-4 border rounded-lg cursor-pointer transition duration-150 ${selectedDownloads.has(key) ? 'border-indigo-500 bg-indigo-50 shadow-inner' : 'border-gray-300 hover:bg-gray-50'}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedDownloads.has(key)}
+                                                    onChange={() => handleToggleDownload(key)}
+                                                    className="h-5 w-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                />
+                                                <div className="ml-3">
+                                                    <span className="font-medium text-gray-700">{label}</span>
+                                                    <p className={`text-sm font-bold ${color}`}>{count.toLocaleString()} rows</p>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={handleDownloadAll}
+                                        disabled={selectedDownloads.size === 0}
+                                        className={`w-full px-6 py-3 rounded-xl font-semibold text-white transition duration-200 flex items-center justify-center ${selectedDownloads.size > 0 ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'}`}
                                     >
-                                        Download {selectedDownloads.length} Report{selectedDownloads.length !== 1 ? 's' : ''}
+                                        <Download size={20} className="mr-2"/>
+                                        Download ({selectedDownloads.size}) Report{selectedDownloads.size !== 1 ? 's' : ''}
                                     </button>
                                 </div>
-                            </div>
-                            
-                            {/* Traceability Note */}
-                            <div className="bg-gray-100 rounded-lg p-4 mt-6">
-                                <p className="text-sm text-gray-700 flex items-start">
-                                    <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-gray-600" />
-                                    <span>
-                                        **Traceability Note:** All generated data sheets include the **`__Composite_ID`** (the key used for matching, serialized to string), **`__Source_File`**, **`__Original_Row_Index`**, and **`__Appearance_Count`** columns for traceability and frequency analysis. **Matched/Unmatched reports are restricted to their source file's original columns only.**
-                                    </span>
-                                </p>
-                            </div>
 
-                            <div className="text-center pt-8">
-                                <button 
-                                    onClick={() => { setStep(1); setResults(null); setFileDataA(initialState); setFileDataB(initialState); setSelectedDownloads(['summary']); }} 
-                                    className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
-                                >
-                                    Start New Reconciliation
-                                </button>
+                                {/* Structured Summary Tables */}
+                                <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                                    <h3 className="font-bold text-xl mb-4 text-gray-800">Detailed Structured Summary</h3>
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                        {/* Category A Summary */}
+                                        <SummaryTable metrics={results.summaryMetricsA} category={fileDataA.name} />
+                                        
+                                        {/* Category B Summary */}
+                                        <SummaryTable metrics={results.summaryMetricsB} category={fileDataB.name} />
+                                    </div>
+                                </div>
+
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <p className="text-sm text-blue-800 flex items-start">
+                                        <Info size={18} className="mr-2 mt-0.5 flex-shrink-0 text-blue-600" />
+                                        <span>
+                                            **Traceability Note:** All generated data sheets include the **`__Composite_ID`** (the key used for matching, serialized to string), **`__Source_File`**, **`__Original_Row_Index`**, and **`__Appearance_Count`** columns for traceability and frequency analysis.
+                                        </span>
+                                    </p>
+                                </div>
+
+                                <div className="text-center pt-4">
+                                    <button 
+                                        onClick={() => { 
+                                            setStep(1); 
+                                            setResults(null); 
+                                            setFileDataA(initialState); 
+                                            setFileDataB(initialState); 
+                                            setSelectedDownloads(new Set(['matched', 'uniqueA', 'uniqueB']));
+                                            setSelectedReportColumns(new Set()); // Reset new state
+                                        }} 
+                                        className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100 transition duration-200"
+                                    >
+                                        Start New Reconciliation
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -721,7 +674,7 @@
             </div>
         );
     };
-
+    
     // Render the React application
     const container = document.getElementById('root');
     const root = ReactDOM.createRoot(container);
